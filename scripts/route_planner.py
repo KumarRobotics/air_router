@@ -16,7 +16,7 @@ SCALE = .3
 
 
 class Path_planner():
-    def __init__(self, filename, image):
+    def __init__(self, filename, image, offset_x, offset_y):
         # Check that the file is a proper Path_planner file
         with open(filename, 'r') as f:
             yml = yaml.load(f, Loader=yaml.FullLoader)
@@ -27,29 +27,48 @@ class Path_planner():
                 yml['groundStation'] != "QGroundControl"):
             sys.exit(f"Error: {filename} is not a valid QGC plan file")
 
+        # The origin of the quad is an offset from the current utm position
+        self.offset = np.array([float(offset_x), float(offset_y)])
+
         self.filename = filename
+        # Get mission in utm
         self.mission = yml["mission"]["items"]
-        self.rally = yml["rallyPoints"]["points"]
+        for m in self.mission:
+            if m["params"][4] is not None and m["params"][5] is not None:
+                m["params"][4:6] = utm.from_latlon(m["params"][4],
+                                                   m["params"][5])[:2] + self.offset
+
+        # Get rally points in utm
+        self.rally = [utm.from_latlon(x, y)[:2]+self.offset for [x, y, _] in
+                      yml["rallyPoints"]["points"]]
+        # Extract waypoints from the mission
         self.waypoints = {i:d for i, d in enumerate(self.mission) if d["command"] == 16}
+
+        # Get fence in UTM
         self.fence = yml["geoFence"]["polygons"][0]
+        for p in self.fence["polygon"]:
+            p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] + self.offset
         if not self.fence["inclusion"]:
             sys.exit("Error: the geoFence is not an inclusion zone")
+
+        # Get no fly zones in UTM
         self.noFly = [i for i in yml["geoFence"]["polygons"]
                       if not i["inclusion"]]
+        for nf in self.noFly:
+            for p in nf["polygon"]:
+                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] + self.offset
 
         # Store the last path for visualization purposes
         self.last_start = None
         self.last_end = None
         self.last_path = None
 
-        # self.origin_lat, self.origin_long, _ = self.mission['plannedHomePosition']
+        # Origin of the image in UTM
         img_lat, img_long = [39.943254, -75.202198]
-        [self.img_utm_east, self.img_utm_north, _, _] = utm.from_latlon(img_lat, img_long)
+        self.img_utm = utm.from_latlon(img_lat, img_long)[:2] + self.offset
         img_bottom_lat, img_bottom_long = [39.939762, -75.1982]
-        [img_bottom_utm_east, img_bottom_utm_north, _, _] = utm.from_latlon(img_bottom_lat,
-                                                                      img_bottom_long)
-        self.corners_latlong = np.array([[img_lat, img_long],
-                                         [img_bottom_lat, img_bottom_long]])
+        img_utm_bottom = utm.from_latlon(img_bottom_lat, img_bottom_long)[:2] + self.offset
+        self.corners_latlong = np.array([self.img_utm, img_utm_bottom ])
 
         # Keep picture for displaying purposes
         img = cv2.imread(image)
@@ -58,22 +77,22 @@ class Path_planner():
         self.img = cv2.resize(img, (0,0), fx=SCALE, fy=SCALE)
 
         # Get the scale of the image
-        self.scale_east = self.img.shape[1]/(img_bottom_utm_east - self.img_utm_east)
-        self.scale_north = self.img.shape[0]/(img_bottom_utm_north - self.img_utm_north)
+        pdb.set_trace()
+        self.scale_east = self.img.shape[1]/(img_utm_bottom[0] - self.img_utm[0])
+        self.scale_north = self.img.shape[0]/(img_utm_bottom[1] - self.img_utm[1])
+        print(f"Scale: {self.scale_east}, {self.scale_north}")
         self.generateGraph()
 
-    def scale_points(self, lats, longs):
-        """ scale_points can take a single latitude/longitude or a list, and
-        converts it to the corresponding x,y coordinate in the image"""
-        if isinstance(lats, float):
-            lats = [lats]
-            longs = [longs]
+    def scale_points(self, utms_x, utms_y):
+        """ scale_points can take an utm point corresponding x,y coordinate in the image"""
+        if isinstance(utms_x, float):
+            utms_x = [utms_x]
+            utms_y = [utms_y]
         x = []
         y = []
-        for lat, lon in zip(lats, longs):
-            utm_east, utm_north, _, _ = utm.from_latlon(lat, lon)
-            x_, y_ = [int((utm_east - self.img_utm_east)*self.scale_east),
-                    int((utm_north - self.img_utm_north)*self.scale_north)]
+        for utm_x, utm_y in zip(utms_x, utms_y):
+            x_, y_ = [int((utm_x - self.img_utm[0])*self.scale_east),
+                    int((utm_y - self.img_utm[1])*self.scale_north)]
             x.append(x_)
             y.append(y_)
         if len(x) == 1:
@@ -81,11 +100,9 @@ class Path_planner():
         return x, y
 
     def getDistance(self, p1, p2):
-        """Gets the distance in meters from two points p1 and p2, each point has
-        latitude and longitude"""
-        p_1_e, p_1_n, _, _ = utm.from_latlon(p1[0], p1[1])
-        p_2_e, p_2_n, _, _ = utm.from_latlon(p2[0], p2[1])
-        return np.sqrt((p_1_e - p_2_e)**2 + (p_1_n - p_2_n)**2)
+        """Gets the distance in meters from two points p1 and p2, both points in
+        utm"""
+        return np.linalg.norm(np.array(p1) - np.array(p2))
 
     def draw_poly_nofly(self, img, filled=False):
         if len(img.shape) == 2:
@@ -309,6 +326,8 @@ if __name__ == "__main__":
             description='Read a yaml file and plot waypoints')
     parser.add_argument('--filename', help='YAML file to read', required=True)
     parser.add_argument('--image', help='Image to display', required=True)
+    parser.add_argument('--offset_x', help='UTM offset x', required=True)
+    parser.add_argument('--offset_y', help='UTM offset y', required=True)
     args = parser.parse_args()
 
     # Check if the file exists
@@ -320,7 +339,8 @@ if __name__ == "__main__":
         sys.exit(f"Error: {args.image} does not exist")
 
     # Check that image exists
-    q = Path_planner(args.filename, "../images/pennovation2.png")
+    q = Path_planner(args.filename, "../images/pennovation2.png", 
+                     args.offset_x, args.offset_y)
 
     q.display_points(mission=True)
 
