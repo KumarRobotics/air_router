@@ -30,6 +30,7 @@ class Path_planner():
         self.filename = filename
         self.mission = yml["mission"]["items"]
         self.rally = yml["rallyPoints"]["points"]
+        self.waypoints = {i:d for i, d in enumerate(self.mission) if d["command"] == 16}
         self.fence = yml["geoFence"]["polygons"][0]
         if not self.fence["inclusion"]:
             sys.exit("Error: the geoFence is not an inclusion zone")
@@ -107,11 +108,11 @@ class Path_planner():
         return img
 
     def generateGraph(self):
-        # create a set with all the possible rally points
+        # create a set with all the possible waypoints
         points = {}
-        for i, p in enumerate(self.rally):
-            points[i] = {"latlon": p[:2], "neigh": {j: None for j in
-                                                    range(len(self.rally)) if
+        for i in self.waypoints:
+            points[i] = {"latlon": self.waypoints[i]["params"][4:6],
+                         "neigh": {j: None for j in self.waypoints.keys() if
                                                     j != i}}
 
         # Remove points that are too far away from each other
@@ -175,7 +176,7 @@ class Path_planner():
             print("Start or end point is outside the allowed geofence")
             return None
 
-        # Find the closest rally point to the start and end
+        # Find the closest waypoint to the start and end
         dstart = np.inf
         dend = np.inf
         for r in self.graph:
@@ -237,8 +238,8 @@ class Path_planner():
                 # print(f"Lat: {lat:.6f}, Lon: {lon:.6f}")
                 x, y = self.scale_points(lat, lon)
                 img = cv2.circle(img, (x, y), 2, (0, 0, 255), -1)
-                # img = cv2.putText(img, str(i), (x, y),
-                #                   cv2.FONT_HERSHEY_SIMPLEX, .25, (0, 0, 255))
+                img = cv2.putText(img, str(i), (x, y),
+                                  cv2.FONT_HERSHEY_SIMPLEX, .25, (0, 0, 255))
 
                 if old_x is not None and old_y is not None:
                     img = cv2.line(img, (old_x, old_y), (x, y), (0, 255, 0), 1)
@@ -321,6 +322,18 @@ if __name__ == "__main__":
     # Check that image exists
     q = Path_planner(args.filename, "../images/pennovation2.png")
 
+    q.display_points(mission=True)
+
+    # a = {r:{"neigh": list(q.graph[r]["neigh"].keys()),
+    #         "utm": [str(j) for j in utm.from_latlon(q.graph[r]["latlon"][0],
+    #                                q.graph[r]["latlon"][1]) 
+    #                 ]} for r in q.graph}
+    # pprint.pprint(a)
+    # # save a into a yaml
+    # with open("test.yaml", "w") as f:
+    #     f.write(yaml.dump(a))
+    # sys.exit()
+
     i = 0
     while (i < 10):
         start_latlon = [random.uniform(q.corners_latlong[0, 0],
@@ -331,7 +344,6 @@ if __name__ == "__main__":
                                      q.corners_latlong[1, 0]),
                       random.uniform(q.corners_latlong[0, 1],
                                      q.corners_latlong[1, 1])]
-        print(f"Start: {start_latlon}, End: {end_latlon}")
         route = q.planRoute(start_latlon, end_latlon)
         if route is not None:
             q.display_points(noFly=True, rally=True, routes=True, plan=True)
