@@ -19,6 +19,7 @@ creates a plan for performing the action using the router.
 """
 class Navigator:
     def __init__(self):
+        rospy.init_node('navigator', anonymous=True)
         # Create a path planner object within the navigator
         rospack = rospkg.RosPack()
         this_path = rospack.get_path('air_router')
@@ -61,7 +62,13 @@ class Navigator:
             rospy.logerr("Unknown transition from %s to %s", self.mode, data.action)
             rospy.signal_shutdown("Shutting down navigator")
 
+    def pose_callback(self, data):
+        self.uav_pose = data
+
     def send_waypoint_uav(waypoint):
+        pass
+
+    def arrived_at_waypoint(self, waypoint):
         pass
 
     def exploration_thread(self):
