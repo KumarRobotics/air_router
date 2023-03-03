@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+from os import wait
 import rospy
 import route_planner
+import argparse
+import os
+import yaml
 from std_msgs.msg import String
 import threading
 from air_router.msg import Goal
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 import pdb
 import rospkg
 import numpy as np
@@ -18,17 +22,28 @@ receives a working mode from the state machine("go to robot", "explore") and
 creates a plan for performing the action using the router.
 """
 class Navigator:
-    def __init__(self):
+    def __init__(self, map_name):
         rospy.init_node('navigator', anonymous=True)
-        # Create a path planner object within the navigator
-        rospack = rospkg.RosPack()
-        this_path = rospack.get_path('air_router')
-        self.planner = route_planner.Path_planner(this_path + "/sample_data/Pennovation_Ian_2023.plan",
-                                             this_path + "/images/pennovation2.png")
+
+        self.map_name = map_name
+
+        # Get the path to the mission file
+        pkg = rospkg.RosPack()
+        path = pkg.get_path('semantics_manager')
+        map_yaml_path = os.path.join(path, "maps", args.map_name, "map_config.yaml")
+        with open(map_yaml_path, "r") as f:
+            map_yaml = yaml.load(f, Loader=yaml.FullLoader)
+        mission_file = os.path.join(path, "maps", args.map_name, map_yaml["quad_plan"])
+
+        # Create a path planner and mission objects
+        self.mission = route_planner.Mission(mission_file, map_yaml["quad_plan_format"])
+        self.planner = route_planner.Path_planner(self.mission, self.map_name)
+
         # We will wait for a mode from the state machine
         self.mode = None
-        self.waypoint_list = list(self.planner.waypoints.keys())
+        self.waypoint_list = list(self.mission.waypoints.keys())
         self.explore_target_waypt = self.waypoint_list.copy()
+        self.uav_pose = None
 
         # Create threads for the different modes
         self.explore_thread = threading.Thread(target=self.exploration_thread)
@@ -39,21 +54,31 @@ class Navigator:
         # Create subscribers for the state machine topics: goal and coordinates
         rospy.Subscriber("/airrouter/goal", Goal, self.goal_callback)
 
-        # Create a subscriber for the UAV position
-        rospy.Subscriber("/airrouter/pose", PointStamped, self.pose_callback)
+        # Create a subscriber for the UAV position. This is for the simulator.
+        # For the real world, we will use the GPS input here
+        rospy.Subscriber("/unity_ros/quadrotor/TrueState/pose",
+                         PoseStamped, self.pose_callback)
 
+        # Publish the goal for the UAV. For simulation, we will just publish a
+        # goal, for the real world, we will use the mavros interface
+        self.uav_goal = rospy.Publisher("/quadrotor/goal",
+                                        PointStamped, queue_size=10)
+        self.uav_goal_seq = 0
 
 
     def goal_callback(self, data):
         if self.mode is None and data.action == "explore":
+            rospy.loginfo("Starting exploration")
             # initial explore
             self.explore_thread.start()
 
         elif self.mode == "explore" and data.action == "go to robot":
+            rospy.loginfo("Going to robot")
             self.mode = "go to robot"
             # transition to go to robot
             pass
         elif self.mode == "go to robot" and data.action == "explore":
+            rospy.loginfo("Resuming exploration")
             self.mode = "explore"
             # transition to explore
             pass
@@ -65,11 +90,28 @@ class Navigator:
     def pose_callback(self, data):
         self.uav_pose = data
 
-    def send_waypoint_uav(waypoint):
-        pass
+    def send_waypoint_uav(self, target_wpt):
+        # For simulation purposes, we will publish the target waypoint
+        target = PoseStamped()
+        target.header.seq = self.uav_goal_seq
+        self.uav_goal_seq += 1
+        target.header.stamp = rospy.Time.now()
+        waypoint = self.mission.waypoints[target_wpt]
+        target.pose.position.x = waypoint[0]
+        target.pose.position.y = waypoint[1]
+        self.uav_goal.publish()
+
+        # For the quad, we are calling the mavros interface to do it
+        # TODO
 
     def arrived_at_waypoint(self, waypoint):
-        pass
+        if self.uav_pose is not None:
+            wp = self.mission.waypoints[waypoint]
+            target = np.array([self.uav_pose.pose.position.x,
+                               self.uav_pose.pose.position.y])
+            if np.linalg.norm(target - wp) < ACCEPTANCE_RADIUS:
+                return True
+        return False
 
     def exploration_thread(self):
         rate = rospy.Rate(10)
@@ -92,5 +134,9 @@ class Navigator:
 
 
 if __name__ == "__main__":
-    Navigator()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--map_name", help="Name of the map to use",
+                        required=True)
+    args = parser.parse_args()
+    Navigator(args.map_name)
     rospy.spin()
