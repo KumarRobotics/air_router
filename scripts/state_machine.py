@@ -14,9 +14,9 @@ import numpy as np
 JACKALS = ["husky1", "husky2", "husky3"]
 
 # Explore for 5 minutes before trying to find a communication robot
-INITIAL_EXPLORATION_TIME_S = 5*60
-SHORT_EXPLORATION_TIME_S = 2*60
-SEARCH_TIME_S = 5*60
+INITIAL_EXPLORATION_TIME_S = 1*60
+SHORT_EXPLORATION_TIME_S = 60//2
+SEARCH_TIME_S = 1*60
 
 # A robot is alive if we communicated in the last 20 minutes
 ALIVE_TIME_S = 20*60
@@ -65,20 +65,25 @@ class Robot:
         self.last_pose_ts = rospy.get_time()
 
     def destination_callback(self, msg):
-        # Call the heartbeat function, as we got information from the robot
-        self.heartbeat()
         # msg is a Path, we only care about the last point.
         # Store as a PointStamped
-        self.last_destination = PointStamped()
-        self.last_destination.header = msg.header
+        last_destination = PointStamped()
+        last_destination.header = msg.header
         # If the robot reaches a destination and the quad is not notified of
         # that destination, just send the current pose as destination
         if len(msg.poses) == 0:
-            self.last_destination.point = self.last_pose.point
+            if self.last_pose is not None:
+                last_destination.point = self.last_pose.point
+            else:
+                return
         else:
-            self.last_destination.point = msg.poses[-1].pose.position
-        self.last_destination.header.frame_id = self.robot_name
-        self.last_destination_ts = rospy.get_time()
+            last_destination.point = msg.poses[-1].pose.position
+        last_destination.header.frame_id = self.robot_name
+        last_destination_ts = rospy.get_time()
+        self.last_destination = last_destination
+
+        # Call the heartbeat function, as we got information from the robot
+        self.heartbeat()
 
     def is_alive(self):
         if self.last_heartbeat is not None:

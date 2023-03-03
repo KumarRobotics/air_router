@@ -2,7 +2,6 @@
 from os import wait
 import rospy
 import route_planner
-import argparse
 import os
 import yaml
 from std_msgs.msg import String
@@ -22,19 +21,18 @@ receives a working mode from the state machine("go to robot", "explore") and
 creates a plan for performing the action using the router.
 """
 class Navigator:
-    def __init__(self, map_name):
+    def __init__(self):
         rospy.init_node('navigator', anonymous=False)
         rospy.loginfo(f"{rospy.get_name()}: Started")
-
-        self.map_name = map_name
+        self.map_name = rospy.get_param("~map_name")
 
         # Get the path to the mission file
         pkg = rospkg.RosPack()
         path = pkg.get_path('semantics_manager')
-        map_yaml_path = os.path.join(path, "maps", args.map_name, "map_config.yaml")
+        map_yaml_path = os.path.join(path, "maps", self.map_name, "map_config.yaml")
         with open(map_yaml_path, "r") as f:
             map_yaml = yaml.load(f, Loader=yaml.FullLoader)
-        mission_file = os.path.join(path, "maps", args.map_name, map_yaml["quad_plan"])
+        mission_file = os.path.join(path, "maps", self.map_name, map_yaml["quad_plan"])
 
         # Create a path planner and mission objects
         self.mission = route_planner.Mission(mission_file, map_yaml["quad_plan_format"])
@@ -206,6 +204,7 @@ class Navigator:
                                                   robot_target.y])
             if route is None:
                 rospy.logerr(f"{rospy.get_name()}: Could not find a route to the robot")
+                return
 
             # Check if we are already at the first waypoint
             if len(route) > 0 and self.outer.arrived_at_waypoint(route[0]):
@@ -232,9 +231,5 @@ class Navigator:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--map_name", help="Name of the map to use",
-                        required=True)
-    args = parser.parse_args()
-    Navigator(args.map_name)
+    Navigator()
     rospy.spin()
