@@ -8,7 +8,7 @@ import yaml
 from std_msgs.msg import String
 import threading
 from air_router.msg import Goal
-from geometry_msgs.msg import PointStamped, PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped, Point
 import pdb
 import rospkg
 import numpy as np
@@ -23,7 +23,8 @@ creates a plan for performing the action using the router.
 """
 class Navigator:
     def __init__(self, map_name):
-        rospy.init_node('navigator', anonymous=True)
+        rospy.init_node('navigator', anonymous=False)
+        rospy.loginfo(f"{rospy.get_name()}: Started")
 
         self.map_name = map_name
 
@@ -45,11 +46,11 @@ class Navigator:
         self.explore_target_waypt = self.waypoint_list.copy()
         self.uav_pose = None
 
+        self.robot_target = None
+
         # Create threads for the different modes
-        self.explore_thread = threading.Thread(target=self.exploration_thread)
-        self.explore_thread.daemon = True
-        self.goto_robot_thread = threading.Thread(target=self.goto_robot_thread)
-        self.goto_robot_thread.daemon = True
+        self.stop_exploration = threading.Event()
+        self.stop_goto_robot = threading.Event()
 
         # Create subscribers for the state machine topics: goal and coordinates
         rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
@@ -68,20 +69,42 @@ class Navigator:
 
     def goal_callback(self, data):
         if self.mode is None and data.action == "explore":
-            rospy.loginfo("Starting exploration")
+            self.mode = "explore"
             # initial explore
+            self.explore_thread = self.ExplorationThread(self, self.stop_exploration)
+            self.explore_thread.daemon = True
             self.explore_thread.start()
 
         elif self.mode == "explore" and data.action == "go to robot":
-            rospy.loginfo("Going to robot")
+            # Signal the exploration thread to stop
+            self.stop_exploration.set()
+            self.explore_thread.join()
+            # Loiter at the current position
+            self.send_loiter_uav()
+            # Go find the robot
             self.mode = "go to robot"
-            # transition to go to robot
-            pass
+            self.robot_target = data.goal.point
+            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_goto_robot)
+            self.goto_robot_thread.daemon = True
+            self.goto_robot_thread.start()
         elif self.mode == "go to robot" and data.action == "explore":
-            rospy.loginfo("Resuming exploration")
+            # Signal the go to robot thread to stop
+            self.stop_goto_robot.set()
+            self.goto_robot_thread.join()
+            # Loiter at the current position
+            self.send_loiter_uav()
+            # Go to the last exploration position
+            p = self.mission.waypoints[self.explore_target_waypt[0]]
+            self.robot_target = Point(p[0], p[1], 60)
+            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_goto_robot)
+            self.goto_robot_thread.daemon = True
+            self.goto_robot_thread.start()
+            self.goto_robot_thread.join()
+            # Resume exploration
             self.mode = "explore"
-            # transition to explore
-            pass
+            self.explore_thread = self.ExplorationThread(self, self.stop_exploration)
+            self.explore_thread.daemon = True
+            self.explore_thread.start()
         else:
             # unknown transition. Die
             rospy.logerr("Unknown transition from %s to %s", self.mode, data.action)
@@ -100,40 +123,112 @@ class Navigator:
         target.point.x = waypoint[0]
         target.point.y = waypoint[1]
         target.point.z = 60
-        # rospy.loginfo(f"Sending waypoint {target_wpt} {waypoint[0]} {waypoint[1]}")
         self.uav_goal.publish(target)
-
         # For the quad, we are calling the mavros interface to do it
         # TODO
+
+    def send_loiter_uav(self):
+        # For simulation purposes, we will publish the current position of the
+        # robot
+        if self.uav_pose is None:
+            return
+        target = PointStamped()
+        target.header.seq = self.uav_goal_seq
+        self.uav_goal_seq += 1
+        target.header.stamp = rospy.Time.now()
+        target.point.x = self.uav_pose.pose.position.x
+        target.point.y = self.uav_pose.pose.position.y
+        target.point.z = self.uav_pose.pose.position.z
+        self.uav_goal.publish(target)
+        # TODO: for the real quad, we should send the loiter cmd
 
     def arrived_at_waypoint(self, waypoint):
         if self.uav_pose is not None:
             wp = self.mission.waypoints[waypoint]
             target = np.array([self.uav_pose.pose.position.x,
                                self.uav_pose.pose.position.y])
+            # print(f"Current position: {target}, target: {wp}")
             if np.linalg.norm(target - wp) < ACCEPTANCE_RADIUS:
                 return True
         return False
 
-    def exploration_thread(self):
-        rate = rospy.Rate(10)
-        while not rospy.is_shutdown():
-            # Get the top element on the list as target waypoint
-            target = self.explore_target_waypt[0]
-            rospy.loginfo("Going to waypoint %s", target)
-            self.explore_target_waypt = self.explore_target_waypt[1:] + [target]
-            # Send target waypoint to the UAV and check if we arrived. If we
-            # arrived, send the next waypoint
-            self.send_waypoint_uav(target)
-            while (not self.arrived_at_waypoint(target) and
-                   not rospy.is_shutdown()):
-                # Wait to arrive at the waypoint
+    class ExplorationThread(threading.Thread):
+        def __init__(self, outer, stop_event):
+            super().__init__()
+            self.stop_event = stop_event
+            self.outer = outer
+
+        def run(self):
+            self.stop_event.clear()
+            rate = rospy.Rate(10)
+            rospy.loginfo(f"{rospy.get_name()}: Starting exploration")
+            while not rospy.is_shutdown() and not self.stop_event.is_set():
+                # Get the top element on the list as target waypoint
+                target = self.outer.explore_target_waypt[0]
+                # Send target waypoint to the UAV and check if we arrived. If we
+                # arrived, send the next waypoint
+                self.outer.send_waypoint_uav(target)
+                rospy.loginfo(f"{rospy.get_name()}: Exploration - Going to waypoint %s", target)
+                while (not self.outer.arrived_at_waypoint(target) and
+                       not rospy.is_shutdown() and
+                       not self.stop_event.is_set()):
+                    # Wait to arrive at the waypoint
+                    rate.sleep()
+                if self.outer.arrived_at_waypoint(target):
+                    self.outer.explore_target_waypt = self.outer.explore_target_waypt[1:] + [target]
+            rospy.loginfo(f"{rospy.get_name()}: End exploration")
+
+    class GoToTargetThread(threading.Thread):
+        def __init__(self, outer, stop_event):
+            super().__init__()
+            self.stop_event = stop_event
+            self.outer = outer
+
+        def run(self):
+            self.stop_event.clear()
+            rate = rospy.Rate(10)
+
+            rospy.loginfo(f"{rospy.get_name()}: Starting Go To Robot")
+
+            # Wait until we have a valid robot pose
+            while (not rospy.is_shutdown() and
+                   not self.stop_event.is_set() and
+                   self.outer.uav_pose is None):
                 rate.sleep()
 
-    def goto_robot_thread(self):
-        rate = rospy.Rate(10)
-        while not rospy.is_shutdown():
-            rate.sleep()
+            # Get the current position of the robot and target
+            pos = self.outer.uav_pose.pose.position
+            robot_target = self.outer.robot_target
+
+            # Get the trajectory from the current position to the target
+            route = self.outer.planner.planRoute([pos.x, pos.y],
+                                                 [robot_target.x,
+                                                  robot_target.y])
+            if route is None:
+                rospy.logerr(f"{rospy.get_name()}: Could not find a route to the robot")
+
+            # Check if we are already at the first waypoint
+            if len(route) > 0 and self.outer.arrived_at_waypoint(route[0]):
+                route = route[1:]
+
+            rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Route: {route}")
+
+            while not rospy.is_shutdown() and not self.stop_event.is_set():
+                # Get the top element of the route
+                target = route.pop(0)
+                rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Going to waypoint %s", target)
+                # Send target waypoint to the UAV and check if we arrived. If we
+                # arrived, send the next waypoint
+                self.outer.send_waypoint_uav(target)
+                while (not self.outer.arrived_at_waypoint(target) and
+                       not rospy.is_shutdown() and
+                       not self.stop_event.is_set()):
+                    # Wait to arrive at the waypoint
+                    rate.sleep()
+                # Check if we made it to the end
+                if len(route) == 0:
+                    rospy.loginfo(f"{rospy.get_name()}: GoToTarget: we reached the target")
+                    return
 
 
 if __name__ == "__main__":
