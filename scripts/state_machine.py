@@ -11,12 +11,12 @@ import numpy as np
 
 
 # List of all the robots
-JACKALS = ["callisto", "europa", "io"]
+JACKALS = ["husky1", "husky2", "husky3"]
 
 # Explore for 5 minutes before trying to find a communication robot
-INITIAL_EXPLORATION_TIME_S = 3 #5*60
-SHORT_EXPLORATION_TIME_S = 3 #2*60
-SEARCH_TIME_S = 10 #5*60
+INITIAL_EXPLORATION_TIME_S = 5*60
+SHORT_EXPLORATION_TIME_S = 2*60
+SEARCH_TIME_S = 5*60
 
 # A robot is alive if we communicated in the last 20 minutes
 ALIVE_TIME_S = 20*60

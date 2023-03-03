@@ -52,7 +52,7 @@ class Navigator:
         self.goto_robot_thread.daemon = True
 
         # Create subscribers for the state machine topics: goal and coordinates
-        rospy.Subscriber("/airrouter/goal", Goal, self.goal_callback)
+        rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
 
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
@@ -118,6 +118,7 @@ class Navigator:
         while not rospy.is_shutdown():
             # Get the top element on the list as target waypoint
             target = self.explore_target_waypt[0]
+            rospy.loginfo("Going to waypoint %s", target)
             self.explore_target_waypt = self.explore_target_waypt[1:] + [target]
             # Send target waypoint to the UAV and check if we arrived. If we
             # arrived, send the next waypoint
