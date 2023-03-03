@@ -315,6 +315,12 @@ class Path_planner():
 
         if noFly:
             img = self.draw_poly_nofly(img, filled=False)
+            fence = np.array(self.mission.fence["polygon"])
+            fence_x, fence_y = self.scale_points(fence[:, 0], fence[:, 1])
+            fence = np.array([fence_x, fence_y]).T
+            fence = fence.reshape((-1, 1, 2))
+            # Draw polygon for the fence
+            img = cv2.polylines(img, [fence], True, (0, 255, 255), 1)
 
         if routes:
             for route in self.graph:
