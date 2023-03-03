@@ -365,21 +365,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
             prog=f"{os.path.basename(__file__)}",
             description='Read a yaml file and plot waypoints')
-    parser.add_argument('--mission_file', help='YAML file with the mission', required=True)
-    parser.add_argument('--mission_file_format',
-                        help='Format of the mission file: QGC/Sim',
-                        required=True)
     parser.add_argument('--map_name',
                         help='Map name to use from semantics_manager',
                         required=True)
     args = parser.parse_args()
 
-    # Check if the file exists
-    if not os.path.isfile(args.mission_file):
-        sys.exit(f"Error: {args.mission_file} does not exist")
-
     # Create a mission from the mission file
-    m = Mission(args.mission_file, args.mission_file_format)
+    pkg = rospkg.RosPack()
+    path = pkg.get_path('semantics_manager')
+    map_yaml_path = os.path.join(path, "maps", args.map_name, "map_config.yaml")
+    with open(map_yaml_path, "r") as f:
+        map_yaml = yaml.load(f, Loader=yaml.FullLoader)
+    mission_file = os.path.join(path, "maps", args.map_name, map_yaml["quad_plan"])
+    m = Mission(mission_file, map_yaml["quad_plan_format"])
 
     # Create a path planner object
     q = Path_planner(m, args.map_name)
