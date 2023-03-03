@@ -92,14 +92,16 @@ class Navigator:
 
     def send_waypoint_uav(self, target_wpt):
         # For simulation purposes, we will publish the target waypoint
-        target = PoseStamped()
+        target = PointStamped()
         target.header.seq = self.uav_goal_seq
         self.uav_goal_seq += 1
         target.header.stamp = rospy.Time.now()
         waypoint = self.mission.waypoints[target_wpt]
-        target.pose.position.x = waypoint[0]
-        target.pose.position.y = waypoint[1]
-        self.uav_goal.publish()
+        target.point.x = waypoint[0]
+        target.point.y = waypoint[1]
+        target.point.z = 60
+        # rospy.loginfo(f"Sending waypoint {target_wpt} {waypoint[0]} {waypoint[1]}")
+        self.uav_goal.publish(target)
 
         # For the quad, we are calling the mavros interface to do it
         # TODO
