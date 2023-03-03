@@ -35,11 +35,11 @@ class Robot:
         # transmit a hearbeat every time a communication happens with the robot
 
         # Create a subscriber for the robot pose
-        rospy.Subscriber(f"/air_router/robot/{self.robot_name}/pose",
+        rospy.Subscriber(f"{self.robot_name}/top_down_render/pose_est",
                          PoseWithCovarianceStamped, self.pose_callback)
 
         # Create a subscriber for the robot destination
-        rospy.Subscriber(f"/air_router/robot/{self.robot_name}/destination",
+        rospy.Subscriber(f"{self.robot_name}/spomp_global/path_viz",
                          Path, self.destination_callback)
 
         # Update callback is a function pointer that will be called upon an
@@ -67,11 +67,16 @@ class Robot:
     def destination_callback(self, msg):
         # Call the heartbeat function, as we got information from the robot
         self.heartbeat()
-        # msg is a Path, we only care about the last point. 
+        # msg is a Path, we only care about the last point.
         # Store as a PointStamped
         self.last_destination = PointStamped()
         self.last_destination.header = msg.header
-        self.last_destination.point = msg.poses[-1].pose.position
+        # If the robot reaches a destination and the quad is not notified of
+        # that destination, just send the current pose as destination
+        if len(msg.poses) == 0:
+            self.last_destination.point = self.last_pose.point
+        else:
+            self.last_destination.point = msg.poses[-1].pose.position
         self.last_destination.header.frame_id = self.robot_name
         self.last_destination_ts = rospy.get_time()
 
