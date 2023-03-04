@@ -40,6 +40,7 @@ class Navigator:
 
         # We will wait for a mode from the state machine
         self.mode = None
+        self.mode_pub = rospy.Publisher("/air_router/navigator/status", String, queue_size=10)
         self.waypoint_list = list(self.mission.waypoints.keys())
         self.explore_target_waypt = self.waypoint_list.copy()
         self.uav_pose = None
@@ -48,7 +49,7 @@ class Navigator:
 
         # Create threads for the different modes
         self.stop_exploration = threading.Event()
-        self.stop_goto_robot = threading.Event()
+        self.stop_go_to_target = threading.Event()
 
         # Create subscribers for the state machine topics: goal and coordinates
         rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
@@ -58,16 +59,21 @@ class Navigator:
         rospy.Subscriber("/unity_ros/quadrotor/TrueState/pose",
                          PoseStamped, self.pose_callback)
 
+        # Add a publisher with the current status of the navigator
+
         # Publish the goal for the UAV. For simulation, we will just publish a
         # goal, for the real world, we will use the mavros interface
         self.uav_goal = rospy.Publisher("/quadrotor/goal",
                                         PointStamped, queue_size=10)
         self.uav_goal_seq = 0
 
+    def set_mode(self, mode):
+        self.mode = mode
+        self.mode_pub.publish(self.mode)
 
     def goal_callback(self, data):
         if self.mode is None and data.action == "explore":
-            self.mode = "explore"
+            self.set_mode("explore")
             # initial explore
             self.explore_thread = self.ExplorationThread(self, self.stop_exploration)
             self.explore_thread.daemon = True
@@ -80,26 +86,27 @@ class Navigator:
             # Loiter at the current position
             self.send_loiter_uav()
             # Go find the robot
-            self.mode = "go to robot"
+            self.set_mode("go to robot")
             self.robot_target = data.goal.point
-            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_goto_robot)
+            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_go_to_target)
             self.goto_robot_thread.daemon = True
             self.goto_robot_thread.start()
         elif self.mode == "go to robot" and data.action == "explore":
             # Signal the go to robot thread to stop
-            self.stop_goto_robot.set()
+            self.stop_go_to_target.set()
             self.goto_robot_thread.join()
             # Loiter at the current position
             self.send_loiter_uav()
+            self.set_mode("returning")
             # Go to the last exploration position
             p = self.mission.waypoints[self.explore_target_waypt[0]]
             self.robot_target = Point(p[0], p[1], 60)
-            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_goto_robot)
+            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_go_to_target)
             self.goto_robot_thread.daemon = True
             self.goto_robot_thread.start()
             self.goto_robot_thread.join()
             # Resume exploration
-            self.mode = "explore"
+            self.set_mode("explore")
             self.explore_thread = self.ExplorationThread(self, self.stop_exploration)
             self.explore_thread.daemon = True
             self.explore_thread.start()

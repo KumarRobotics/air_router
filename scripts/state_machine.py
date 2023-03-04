@@ -124,6 +124,11 @@ class StateMachine:
         rospy.Subscriber("/air_router/start", Empty, self.start_callback)
         self.start = False
 
+        # Subscribe to the navigator state
+        rospy.Subscriber("/air_router/navigator/state", String,
+                         self.nav_status_callback)
+        self.nav_status = None
+
         # List of robots for round robin search
         self.robot_list = [Robot(robot, self.robot_found_callback) for robot in robots]
 
@@ -139,6 +144,9 @@ class StateMachine:
 
         # Create a timer to update the state machine regularly
         self.timer = rospy.Timer(rospy.Duration(1), self.update_state)
+
+    def nav_status_callback(self, msg):
+        self.nav_status = msg.data
 
     def robot_found_callback(self):
         self.found_robot = True
@@ -211,6 +219,9 @@ class StateMachine:
         elif self.state == self.State.search:
             self.state_wait_search()
         elif self.state == self.State.wait_search:
+            # reset last_ts if the quad hasn't reached the waypoint
+            if self.nav_status is not None and self.nav_status == "returning":
+                self.last_ts = rospy.get_time()
             if self.found_robot or (rospy.get_time() - self.last_ts > SEARCH_TIME_S):
                 self.state_exploration_short()
 
