@@ -12,14 +12,14 @@ import pdb
 import rospkg
 import numpy as np
 
-# Default acceptance radius for the UAV in meters
-DEFAULT_ACCEPTANCE_RADIUS = 2
-
-"""Navigator class
-This class is responsible for navigating the UAV along the waypoints. It
+"""Navigator:
+This node is responsible for navigating the UAV along the waypoints. It
 receives a working mode from the state machine("go to robot", "explore") and
 creates a plan for performing the action using the router.
 """
+
+# Default acceptance radius for the UAV in meters
+DEFAULT_ACCEPTANCE_RADIUS = 2
 
 
 class Navigator:
@@ -32,7 +32,7 @@ class Navigator:
         self.acceptance_radius = rospy.get_param("~acceptance_radius",
                                                  DEFAULT_ACCEPTANCE_RADIUS)
         if not isinstance(self.acceptance_radius, int) or \
-            self.acceptance_radius < 1 or self.acceptance_radius > 20:
+                self.acceptance_radius < 1 or self.acceptance_radius > 20:
             rospy.logerr(f"{rospy.get_name()}: \
                     Acceptance radius should be an integer between 1 and 20")
             rospy.signal_shutdown("Acceptance radius error")
@@ -58,7 +58,7 @@ class Navigator:
             return
         # Does the map config file exist?
         config_file = os.path.join(path, "maps",
-                                    self.map_name, "map_config.yaml")
+                                   self.map_name, "map_config.yaml")
         if not os.path.exists(config_file):
             rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
             rospy.signal_shutdown("Map config file does not exist")

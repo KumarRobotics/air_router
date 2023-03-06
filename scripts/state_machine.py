@@ -9,27 +9,32 @@ from air_router.msg import Goal
 import pdb
 import numpy as np
 
+""" State machine node
+The state machine node is responsible for the high level control of the aerial
+robot. It will explore the environment for a certain amount of time, then
+it will try to find a communication robot. If it finds a communication robot,
+it will return to exploration mode.
+"""
 
-# List of all the robots
-JACKALS = ["husky1", "husky2", "husky3"]
+# Defaults: explore for 5 minutes before trying to find a communication robot
+DEFAULT_INITIAL_EXPLORATION_TIME = 1*60
+DEFAULT_SHORT_EXPLORATION_TIME = 60//2
+DEFAULT_SEARCH_TIME = 1*60
 
-# Explore for 5 minutes before trying to find a communication robot
-INITIAL_EXPLORATION_TIME_S = 1*60
-SHORT_EXPLORATION_TIME_S = 60//2
-SEARCH_TIME_S = 1*60
-
-# A robot is alive if we communicated in the last 20 minutes
-ALIVE_TIME_S = 20*60
+# Defaults: A robot is alive if we communicated in the last 20 minutes
+DEFAULT_ALIVE_TIME = 20*60
 
 
 class Robot:
-    def __init__(self, robot_name, update_callback):
+    """ We create one Robot class per ground robot that we are tracking """
+    def __init__(self, robot_name, update_callback, alive_time):
         self.robot_name = robot_name
         self.last_heartbeat = None
         self.last_pose = None
         self.last_pose_ts = None
         self.last_destination = None
         self.last_destination_ts = None
+        self.alive_time = alive_time
 
         # Create a ROS subscriber for the transmit heartbeat. The database will
         # transmit a hearbeat every time a communication happens with the robot
@@ -87,11 +92,12 @@ class Robot:
 
     def is_alive(self):
         if self.last_heartbeat is not None:
-            return (rospy.get_time() - self.last_heartbeat < ALIVE_TIME_S)
+            return (rospy.get_time() - self.last_heartbeat < self.alive_time)
         return False
 
     def where_to_find_me(self):
-        if self.last_destination_ts is not None and self.last_pose_ts is not None:
+        if (self.last_destination_ts is not None and
+            self.last_pose_ts is not None):
             if self.last_destination_ts >= self.last_pose_ts:
                 return self.last_destination
             else:
@@ -111,9 +117,33 @@ class StateMachine:
         search = 3
         wait_search = 4
 
-    def __init__(self, robots):
-        assert isinstance(robots, list)
+    def __init__(self):
         rospy.init_node("state_machine")
+
+        # get parameters for the node
+        if not rospy.has_param("~initial_exploration_time"):
+            rospy.logwarn(f"{rospy.get_name()}: Default initial_exploration_time")
+        self.initial_exploration_time = rospy.get_param("~initial_exploration_time",
+                                                        DEFAULT_INITIAL_EXPLORATION_TIME)
+
+        if not rospy.has_param("~short_exploration_time"):
+            rospy.logwarn(f"{rospy.get_name()}: Default short_exploration_time")
+        self.short_exploration_time = rospy.get_param("~short_exploration_time",
+                                                      DEFAULT_SHORT_EXPLORATION_TIME)
+
+        if not rospy.has_param("~search_time"):
+            rospy.logwarn(f"{rospy.get_name()}: Default search_time")
+            self.search_time = rospy.get_param("~search_time", DEFAULT_SEARCH_TIME)
+
+        if not rospy.has_param("~alive_time"):
+            rospy.logwarn(f"{rospy.get_name()}: Default alive_time")
+        self.alive_time = rospy.get_param("~alive_time", DEFAULT_ALIVE_TIME)
+
+        if not rospy.has_param("~robot_list"):
+            rospy.logfatal(f"{rospy.get_name()}: No robot_list parameter")
+            rospy.signal_shutdown("No robot_list parameter")
+            return
+
         # Create two topics. One for the goal of the robot
         # ("go to robot", "explore"). If we are in "go to robot"
         # the second topic will contain the coordinates of the robot
@@ -129,8 +159,13 @@ class StateMachine:
                          self.nav_status_callback)
         self.nav_status = None
 
-        # List of robots for round robin search
-        self.robot_list = [Robot(robot, self.robot_found_callback) for robot in robots]
+        # Robot list is a list of comma separated robots. Generate a list
+        rlist = rospy.get_param("~robot_list").split(",")
+        rlist = [r.strip() for r in rlist]
+        assert len(rlist) > 0
+        self.robot_list = [Robot(r, self.robot_found_callback, self.alive_time)
+                           for r in rlist]
+        rospy.loginfo(f"{rospy.get_name()}: Robot list: {', '.join(rlist)}")
 
         # Create a variable protected by a lock for the state
         self.state = self.State.idle
@@ -163,16 +198,16 @@ class StateMachine:
         self.last_ts = rospy.get_time()
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_short)
-        rospy.loginfo("EXPLORATION: Starting")
+        rospy.loginfo(f"{rospy.get_name()}: Short Expl - Starting")
 
     def state_exploration_initial(self):
         self.last_ts = rospy.get_time()
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_initial)
-        rospy.loginfo("EXPLORATION: Initial")
+        rospy.loginfo(f"{rospy.get_name()}: Initial Expl - Starting")
 
     def state_search(self):
-        rospy.loginfo("SEARCH: Starting")
+        rospy.loginfo(f"{rospy.get_name()}: Search - Starting")
         self.found_robot = False
         # Find the robot to search in a round robin fashion
         robot_to_find = None
@@ -189,10 +224,10 @@ class StateMachine:
         # if we did not find a robot, go back to exploration short
         # but be angry about it
         if robot_to_find is None:
-            rospy.logerr("SEARCH: Did not find a robot to search for")
+            rospy.logwarn(f"{rospy.get_name()}: Search - No robot to search")
             return
 
-        rospy.loginfo(f"SEARCH: Finding robot: {robot_to_find.robot_name}")
+        rospy.logwarn(f"{rospy.get_name()}: Search - finding robot {robot_to_find.robot_name}")
         # We did find a robot, go search for it
         self.set_state(self.State.search)
         robot_to_find.robot_searched = True
@@ -202,8 +237,8 @@ class StateMachine:
 
     def state_wait_search(self):
         # We are just waiting, do nothing
+        rospy.loginfo(f"{rospy.get_name()}: Search Wait - Starting")
         self.set_state(self.State.wait_search)
-        rospy.loginfo("WAIT: waiting for robot search")
 
     def update_state(self, event):
         if self.state == self.State.idle:
@@ -211,10 +246,10 @@ class StateMachine:
             #     self.state_exploration_initial()
             self.state_exploration_initial()
         elif self.state == self.State.exploration_initial:
-            if rospy.get_time() - self.last_ts > INITIAL_EXPLORATION_TIME_S:
+            if rospy.get_time() - self.last_ts > self.initial_exploration_time:
                 self.state_search()
         elif self.state == self.State.exploration_short:
-            if rospy.get_time() - self.last_ts > SHORT_EXPLORATION_TIME_S:
+            if rospy.get_time() - self.last_ts > self.short_exploration_time:
                 self.state_search()
         elif self.state == self.State.search:
             self.state_wait_search()
@@ -222,10 +257,11 @@ class StateMachine:
             # reset last_ts if the quad hasn't reached the waypoint
             if self.nav_status is not None and self.nav_status == "returning":
                 self.last_ts = rospy.get_time()
-            if self.found_robot or (rospy.get_time() - self.last_ts > SEARCH_TIME_S):
+            if (self.found_robot or
+                    (rospy.get_time() - self.last_ts > self.search_time)):
                 self.state_exploration_short()
 
 
 if __name__ == "__main__":
-    StateMachine(JACKALS)
+    StateMachine()
     rospy.spin()
