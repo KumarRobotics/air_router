@@ -253,9 +253,9 @@ class Path_planner():
                 dend = d
                 end_node = r
 
+        # If start and end node are the same, return an empty list
         if start_node == end_node:
-            print("Start and end are the same")
-            return None
+            return []
 
         self.last_path = self.graph[start_node]["path"][end_node]
         return self.last_path
