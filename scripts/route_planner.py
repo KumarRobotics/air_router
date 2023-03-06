@@ -14,8 +14,6 @@ import heapq
 import rospy
 import rospkg
 
-SCALE = 1
-
 """ Route planner uses standard coordinates (m) to plan the mission. These can be
 obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
@@ -29,7 +27,19 @@ class Mission():
             yml = yaml.load(f, Loader=yaml.FullLoader)
 
         if mission_file_format == "QGC":
-            self.offset = np.array([0, 0])
+            # Find the origin of the mission as the point where the takeoff
+            # command happens (command 22). Note: we do not use
+            # plannedHomePosition as this corresponds to the point where the quad
+            # is armed
+            self.origin = None
+            for d in yml["mission"]["items"]:
+                if d["command"] == 22:
+                    if self.origin is None:
+                        self.origin = np.array(utm.from_latlon(d["params"][4],
+                                                               d["params"][5])[:2])
+                    else:
+                        sys.exit("Error: there are more than one takeoff commands")
+
             # Check that the file is a valid QGC mission file
             if (yml['fileType'] != "Plan" or
                     yml['version'] != 1 or
@@ -41,10 +51,10 @@ class Mission():
             for m in mission:
                 if m["params"][4] is not None and m["params"][5] is not None:
                     m["params"][4:6] = utm.from_latlon(m["params"][4],
-                                                       m["params"][5])[:2] - self.offset
+                                                       m["params"][5])[:2] - self.origin
 
             # Get rally points in utm
-            self.rally = [utm.from_latlon(x, y)[:2]-self.offset
+            self.rally = [utm.from_latlon(x, y)[:2] - self.origin
                           for [x, y, _] in
                           yml["rallyPoints"]["points"]]
 
@@ -58,7 +68,7 @@ class Mission():
             # Get fence in UTM
             self.fence = yml["geoFence"]["polygons"][0]
             for p in self.fence["polygon"]:
-                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.offset
+                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin
             if not self.fence["inclusion"]:
                 sys.exit("Error: the geoFence is not an inclusion zone")
 
@@ -68,7 +78,7 @@ class Mission():
                           if not i["inclusion"]]
             for nf in self.noFly:
                 for p in nf:
-                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.offset
+                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin
         elif mission_file_format == "Sim":
             self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
                           if not i["inclusion"]]
@@ -88,10 +98,6 @@ class Path_planner():
         assert isinstance(mission, Mission)
         self.mission = mission
 
-        # The origin of the quad is an offset from the current utm position
-        # self.offset = np.array([float(offset_x), float(offset_y)])
-        self.offset = np.array([0, 0])
-
         # Store the last path for visualization purposes
         self.last_start = None
         self.last_end = None
@@ -107,24 +113,30 @@ class Path_planner():
 
         # Get resolution (px/m) and image origin from the yaml
         self.resolution = map_yaml["resolution"]
-        self.image_origin_px_x = map_yaml["image_origin_px_x"]
-        self.image_origin_px_y = map_yaml["image_origin_px_y"]
 
-        # Origin of the image in UTM
-        # img_lat, img_long = [39.943254, -75.202198]
-        # self.img_utm = utm.from_latlon(img_lat, img_long)[:2] - self.offset
-        # img_bottom_lat, img_bottom_long = [39.939762, -75.1982]
-        # img_utm_bottom = utm.from_latlon(img_bottom_lat, img_bottom_long)[:2] - self.offset
-        # self.corners_latlong = np.array([self.img_utm, img_utm_bottom ])
+        img = cv2.imread(image)
+        # FIXME: Issue #3. Decide which file to use to store this
+        try:
+            self.image_origin_px_x = map_yaml["image_origin_px_x"]
+            self.image_origin_px_y = map_yaml["image_origin_px_y"]
+        except KeyError:
+            try:
+                init_conditions_path = os.path.join(path, "maps", map_name,
+                                                    "init_conditions.yaml")
+                with open(init_conditions_path, 'r') as f:
+                    init_conditions = yaml.load(f, Loader=yaml.FullLoader)
+                self.image_origin_px_x = init_conditions["init_pos_px_x"]
+                self.image_origin_px_y = img.shape[0] - init_conditions["init_pos_px_y"]
+            except Exception as e:
+                rospy.logfatal(e)
+                rospy.logfatal("Error: could not find the image origin")
+                rospy.signal_shutdown("Error: could not find the image origin")
+                return
 
         # Keep picture for displaying purposes
-        img = cv2.imread(image)
-        self.img = cv2.resize(img, (0,0), fx=SCALE, fy=SCALE)
+        self.img = img
 
-        # Get the scale of the image
-        # self.scale_east = self.img.shape[1]/(img_utm_bottom[0] - self.img_utm[0])
-        # self.scale_north = self.img.shape[0]/(img_utm_bottom[1] - self.img_utm[1])
-        # print(f"Scale: {self.scale_east}, {self.scale_north}")
+        # Generate the graph and calculate costs with Dijkstra
         self.generateGraph()
 
     def scale_points(self, utms_x, utms_y):
@@ -213,7 +225,7 @@ class Path_planner():
         # Calculate paths for all the nodes
         # Not very efficient but it is a small graph
         for r in self.graph:
-            _, self.graph[r]["path"] = self.dijstra(r)
+            _, self.graph[r]["path"] = self.dijkstra(r)
 
     def planRoute(self, start_latlon, end_latlon):
         """ Returns the route for """
@@ -260,7 +272,7 @@ class Path_planner():
         self.last_path = self.graph[start_node]["path"][end_node]
         return self.last_path
 
-    def dijstra(self, start):
+    def dijkstra(self, start):
         dist = {node: float('inf') for node in self.graph}
         dist[start] = 0
         pq = [(0, start)]
@@ -285,11 +297,16 @@ class Path_planner():
                 current_node = predecessors[current_node]
         return (dist, paths)
 
-    def display_points(self, waypoints=False, noFly=False, rally=False,
-                       routes=False, plan=False):
+    def display_points(self, origin=False, waypoints=False,
+                       noFly=False, rally=False, routes=False, plan=False):
         old_x = None
         old_y = None
         img = self.img.copy()
+        if origin:
+            # Display the origin in the image
+            img = cv2.circle(img, (int(self.image_origin_px_x),
+                                   int(self.image_origin_px_y)),
+                             thickness=2, radius=10, color=(0, 0, 255))
         if waypoints:
             for i in self.mission.waypoints:
                 wp = self.mission.waypoints[i]
@@ -338,28 +355,28 @@ class Path_planner():
                 last_x_end, last_y_end = self.scale_points(self.last_end[0],
                                          self.last_end[1])
                 img = cv2.circle(img, (last_x_end, last_y_end),
-                                 2, (0, 255, 0), -1)
+                                 5, (0, 255, 255), -1)
 
             if self.last_start is not None:
                 last_x_start, last_y_start = self.scale_points(self.last_start[0],
                                          self.last_start[1])
                 img = cv2.circle(img, (last_x_start, last_y_start),
-                                 2, (0, 255, 0), -1)
+                                 5, (0, 255, 255), -1)
 
             if self.last_path is not None:
                 for i, node in enumerate(self.last_path):
                     lat, long = self.graph[node]["latlon"]
                     x, y = self.scale_points(lat, long)
-                    img = cv2.circle(img, (x, y), 2, (0, 255, 0), -1)
+                    img = cv2.circle(img, (x, y), 5, (0, 255, 255), -1)
                     if i > 0:
                         lat, long = self.graph[self.last_path[i-1]]["latlon"]
                         x2, y2 = self.scale_points(lat, long)
-                        cv2.line(img, (x, y), (x2, y2), (0, 255, 0), 1)
+                        cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 2)
                     if i == 0:
                         cv2.line(img, (x, y),
-                                 (last_x_start, last_y_start), (0, 255, 0), 1)
+                                 (last_x_start, last_y_start), (0, 255, 255), 2)
                 # Plot a line connecting the end and start
-                cv2.line(img, (x, y), (last_x_end, last_y_end), (0, 255, 0), 1)
+                cv2.line(img, (x, y), (last_x_end, last_y_end), (0, 255, 255), 2)
 
         cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
         cv2.imshow('Pennovation', img)
@@ -387,19 +404,10 @@ if __name__ == "__main__":
 
     # Create a path planner object
     q = Path_planner(m, args.map_name)
-
-    # a = {r:{"neigh": list(q.graph[r]["neigh"].keys()),
-    #         "utm": [str(j) for j in utm.from_latlon(q.graph[r]["latlon"][0],
-    #                                q.graph[r]["latlon"][1])
-    #                 ]} for r in q.graph}
-    # pprint.pprint(a)
-    # # save a into a yaml
-    # with open("test.yaml", "w") as f:
-    #     f.write(yaml.dump(a))
-    # sys.exit()
+    # q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
-    while (i < 10):
+    for j in range(1000):
         start_latlon = [random.uniform(-130, 130),
                         random.uniform(-100, 100)]
         end_latlon =   [random.uniform(-130, 130),
