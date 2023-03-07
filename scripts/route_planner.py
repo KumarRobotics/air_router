@@ -241,6 +241,9 @@ class Path_planner():
         fence_mask = cv2.fillPoly(fence_mask, [fence], 255, 1)
         # Invert image as we want black the points outside the fence
         fence_mask = cv2.bitwise_not(fence_mask)
+        # Add all the noFly zones to the fence
+        fence_mask = self.draw_poly_nofly(fence_mask, filled=True)
+
         point_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
         point_mask = cv2.circle(point_mask, self.scale_points(start_latlon[0],
                                                                start_latlon[1]),
@@ -249,7 +252,8 @@ class Path_planner():
                                                               end_latlon[1]),
                                 1, 255, -1)
         if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
-            print("Start or end point is outside the allowed geofence")
+            rospy.logerr("Start or end point is outside the allowed geofence" +
+                         " or the no-fly zone")
             return None
 
         # Find the closest waypoint to the start and end
@@ -265,11 +269,11 @@ class Path_planner():
                 dend = d
                 end_node = r
 
-        # If start and end node are the same, return an empty list
+        # If start and end node are the same, return a list with a single item
         if start_node == end_node:
-            return []
-
-        self.last_path = self.graph[start_node]["path"][end_node]
+            self.last_path = [start_node]
+        else:
+            self.last_path = self.graph[start_node]["path"][end_node]
         return self.last_path
 
     def dijkstra(self, start):
@@ -337,7 +341,7 @@ class Path_planner():
             fence = np.array([fence_x, fence_y]).T
             fence = fence.reshape((-1, 1, 2))
             # Draw polygon for the fence
-            img = cv2.polylines(img, [fence], True, (0, 255, 255), 1)
+            img = cv2.polylines(img, [fence], True, (0, 0, 0), 3)
 
         if routes:
             for route in self.graph:
@@ -353,13 +357,13 @@ class Path_planner():
         if plan:
             if self.last_end is not None:
                 last_x_end, last_y_end = self.scale_points(self.last_end[0],
-                                         self.last_end[1])
+                                                           self.last_end[1])
                 img = cv2.circle(img, (last_x_end, last_y_end),
                                  5, (0, 255, 255), -1)
 
             if self.last_start is not None:
                 last_x_start, last_y_start = self.scale_points(self.last_start[0],
-                                         self.last_start[1])
+                                                               self.last_start[1])
                 img = cv2.circle(img, (last_x_start, last_y_start),
                                  5, (0, 255, 255), -1)
 
@@ -374,9 +378,11 @@ class Path_planner():
                         cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 2)
                     if i == 0:
                         cv2.line(img, (x, y),
-                                 (last_x_start, last_y_start), (0, 255, 255), 2)
+                                 (last_x_start, last_y_start),
+                                 (0, 255, 255), 2)
                 # Plot a line connecting the end and start
-                cv2.line(img, (x, y), (last_x_end, last_y_end), (0, 255, 255), 2)
+                cv2.line(img, (x, y), (last_x_end, last_y_end),
+                         (0, 255, 255), 2)
 
         cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
         cv2.imshow('Pennovation', img)
@@ -407,7 +413,7 @@ if __name__ == "__main__":
     # q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
-    for j in range(1000):
+    for j in range(100):
         start_latlon = [random.uniform(-130, 130),
                         random.uniform(-100, 100)]
         end_latlon =   [random.uniform(-130, 130),
@@ -417,3 +423,5 @@ if __name__ == "__main__":
         if route is not None:
             q.display_points(noFly=True, routes=True, plan=True)
             i += 1
+            if i == 3:
+                break
