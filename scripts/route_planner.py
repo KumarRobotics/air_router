@@ -15,6 +15,7 @@ import rospy
 """ Route planner uses standard coordinates (m) to plan the mission. These can
 be obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
+# FIXME(fclad): The file refers to "latlon" when using standard coordinates.
 
 
 class Mission():
@@ -186,11 +187,15 @@ class Path_planner():
                 if d > 100:
                     del points[i]["neigh"][j]
 
-        # Remove points that intersect with noFly zones
+        # Create a mask for the no-fly zone
         polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
         self.draw_poly_nofly(polygon_mask, filled=True)
 
-        # TODO: check that all the routes are within the fence
+        # Dilate the mask so that the lines are not too close to the fence
+        kernel_size = int(self.resolution)*5
+        polygon_mask = cv2.dilate(polygon_mask,
+                                  np.ones((kernel_size, kernel_size), np.uint8),
+                                  iterations=1)
 
         for i in points:
             for j in points[i]["neigh"].copy():
