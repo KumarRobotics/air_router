@@ -219,7 +219,7 @@ class Navigator:
         def run(self):
             self.stop_event.clear()
             rate = rospy.Rate(10)
-            rospy.loginfo(f"{rospy.get_name()}: Exploration - Start")
+            # rospy.loginfo(f"{rospy.get_name()}: Exploration - Start")
             while not rospy.is_shutdown() and not self.stop_event.is_set():
                 # Get the top element on the list as target waypoint
                 target = self.outer.explore_target_waypt[0]
@@ -234,7 +234,7 @@ class Navigator:
                     rate.sleep()
                 if self.outer.arrived_at_waypoint(target):
                     self.outer.explore_target_waypt = self.outer.explore_target_waypt[1:] + [target]
-            rospy.loginfo(f"{rospy.get_name()}: Exploration - End")
+            # rospy.loginfo(f"{rospy.get_name()}: Exploration - End")
 
     class GoToTargetThread(threading.Thread):
         def __init__(self, outer, stop_event):
@@ -246,7 +246,7 @@ class Navigator:
             self.stop_event.clear()
             rate = rospy.Rate(10)
 
-            rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Start")
+            # rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Start")
 
             # Wait until we have a valid robot pose
             while (not rospy.is_shutdown() and

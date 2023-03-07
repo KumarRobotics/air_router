@@ -207,7 +207,6 @@ class StateMachine:
         rospy.loginfo(f"{rospy.get_name()}: Initial Expl - Starting")
 
     def state_search(self):
-        rospy.loginfo(f"{rospy.get_name()}: Search - Starting")
         self.found_robot = False
         # Find the robot to search in a round robin fashion
         robot_to_find = None
@@ -224,6 +223,7 @@ class StateMachine:
         # if we did not find a robot, go back to exploration short
         # but be angry about it
         if robot_to_find is None:
+            rospy.last_ts = rospy.get_time()
             rospy.logwarn(f"{rospy.get_name()}: Search - No robot to search")
             return
 
