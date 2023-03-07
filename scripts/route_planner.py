@@ -6,7 +6,6 @@ import cv2
 import sys
 import yaml
 import random
-import time
 import pprint
 import utm
 import numpy as np
@@ -14,31 +13,27 @@ import heapq
 import rospy
 import rospkg
 
-""" Route planner uses standard coordinates (m) to plan the mission. These can be
-obtained from UTM (for GPS files) or as absolute coordinates for simulation
+""" Route planner uses standard coordinates (m) to plan the mission. These can
+be obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
 
 
 class Mission():
     """ Get a mission file and convert it to standard coordinates """
-    def __init__(self, mission_file, mission_file_format):
+    def __init__(self, mission_file, mission_file_format, origin=None):
         self.mission_file = mission_file
         with open(mission_file, 'r') as f:
             yml = yaml.load(f, Loader=yaml.FullLoader)
 
         if mission_file_format == "QGC":
-            # Find the origin of the mission as the point where the takeoff
-            # command happens (command 22). Note: we do not use
-            # plannedHomePosition as this corresponds to the point where the quad
-            # is armed
-            self.origin = None
-            for d in yml["mission"]["items"]:
-                if d["command"] == 22:
-                    if self.origin is None:
-                        self.origin = np.array(utm.from_latlon(d["params"][4],
-                                                               d["params"][5])[:2])
-                    else:
-                        sys.exit("Error: there are more than one takeoff commands")
+            # Origin should be a vector with 2 elements, with the UTM
+            # coordinates of the origin of the mission. These will be
+            # subtracted to the UTM coordinates of the waypoints to
+            # scale the mission
+            self.origin = origin
+            assert self.origin is not None
+            assert len(self.origin) == 2
+            assert isinstance(self.origin, np.ndarray)
 
             # Check that the file is a valid QGC mission file
             if (yml['fileType'] != "Plan" or
@@ -93,11 +88,7 @@ class Mission():
 
 
 class Path_planner():
-    def __init__(self, mission, map_name):
-        # Check that mission is a valid object
-        assert isinstance(mission, Mission)
-        self.mission = mission
-
+    def __init__(self, map_name):
         # Store the last path for visualization purposes
         self.last_start = None
         self.last_end = None
@@ -109,32 +100,32 @@ class Path_planner():
         map_yaml_path = os.path.join(path, "maps", map_name, "map_config.yaml")
         with open(map_yaml_path, 'r') as f:
             map_yaml = yaml.load(f, Loader=yaml.FullLoader)
-        image = os.path.join(path, "maps", map_name, map_yaml["viz"])
+        image = os.path.join(path, "maps", map_name, map_yaml["color"])
 
-        # Get resolution (px/m) and image origin from the yaml
-        self.resolution = map_yaml["resolution"]
-
-        img = cv2.imread(image)
-        # FIXME: Issue #3. Decide which file to use to store this
-        try:
-            self.image_origin_px_x = map_yaml["image_origin_px_x"]
-            self.image_origin_px_y = map_yaml["image_origin_px_y"]
-        except KeyError:
-            try:
-                init_conditions_path = os.path.join(path, "maps", map_name,
-                                                    "init_conditions.yaml")
-                with open(init_conditions_path, 'r') as f:
-                    init_conditions = yaml.load(f, Loader=yaml.FullLoader)
-                self.image_origin_px_x = init_conditions["init_pos_px_x"]
-                self.image_origin_px_y = img.shape[0] - init_conditions["init_pos_px_y"]
-            except Exception as e:
-                rospy.logfatal(e)
-                rospy.logfatal("Error: could not find the image origin")
-                rospy.signal_shutdown("Error: could not find the image origin")
-                return
+        # Get resolution (px/m) and image origin pixels from the yaml
+        self.resolution = map_yaml["img_resolution"]
+        self.image_origin_px_x = map_yaml["image_origin_px_x"]
+        self.image_origin_px_y = map_yaml["image_origin_px_y"]
 
         # Keep picture for displaying purposes
+        img = cv2.imread(image)
         self.img = img
+
+        # Create mission object. Only QGC missions have GPS coordinates for the
+        # origin
+        mission_file = os.path.join(path, "maps", args.map_name,
+                                    map_yaml["quad_plan"])
+        mission_file_format = map_yaml["quad_plan_format"]
+        if map_yaml["quad_plan_format"] == "Sim":
+            self.mission = Mission(mission_file, mission_file_format)
+        elif map_yaml["quad_plan_format"] == "QGC":
+            origin = utm.from_latlon(map_yaml["gps_origin_lat"],
+                                     map_yaml["gps_origin_long"])[:2]
+            self.origin = np.array(origin)
+            self.mission = Mission(mission_file, map_yaml["quad_plan_format"],
+                                   self.origin)
+        else:
+            sys.exit("Invalid mission format")
 
         # Generate the graph and calculate costs with Dijkstra
         self.generateGraph()
@@ -399,17 +390,8 @@ if __name__ == "__main__":
                         required=True)
     args = parser.parse_args()
 
-    # Create a mission from the mission file
-    pkg = rospkg.RosPack()
-    path = pkg.get_path('semantics_manager')
-    map_yaml_path = os.path.join(path, "maps", args.map_name, "map_config.yaml")
-    with open(map_yaml_path, "r") as f:
-        map_yaml = yaml.load(f, Loader=yaml.FullLoader)
-    mission_file = os.path.join(path, "maps", args.map_name, map_yaml["quad_plan"])
-    m = Mission(mission_file, map_yaml["quad_plan_format"])
-
     # Create a path planner object
-    q = Path_planner(m, args.map_name)
+    q = Path_planner(args.map_name)
     # q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
