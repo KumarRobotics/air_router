@@ -268,6 +268,7 @@ class Navigator:
 
             if len(route) == 0:
                 rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Already at the target.")
+                return
 
             # Check if we are already at the first waypoint
             if len(route) > 0 and self.outer.arrived_at_waypoint(route[0]):
