@@ -387,8 +387,13 @@ if __name__ == "__main__":
                         required=True)
     args = parser.parse_args()
 
+    import rospkg
+    rospack = rospkg.RosPack()
+    semantics_path = rospack.get_path('semantics_manager')
+    map_path = os.path.join(semantics_path, "maps", args.map_name, "map_config.yaml")
+
     # Create a path planner object
-    q = Path_planner(args.map_name)
+    q = Path_planner(map_path)
     # q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
