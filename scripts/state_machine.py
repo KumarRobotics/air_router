@@ -57,6 +57,7 @@ class Robot:
         self.last_heartbeat = rospy.get_time()
         if self.robot_searched:
             self.robot_searched = False
+            rospy.loginfo(f"{rospy.get_name()}: {self.robot_name} found")
             self.update_callback()
 
     def pose_callback(self, msg):
