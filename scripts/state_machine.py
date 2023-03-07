@@ -181,6 +181,9 @@ class StateMachine:
         # Create a timer to update the state machine regularly
         self.timer = rospy.Timer(rospy.Duration(1), self.update_state)
 
+        # We are good to go!
+        rospy.loginfo(f"{rospy.get_name()}: Started")
+
     def nav_status_callback(self, msg):
         self.nav_status = msg.data
 

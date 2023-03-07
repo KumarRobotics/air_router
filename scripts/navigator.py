@@ -27,7 +27,6 @@ DEFAULT_ACCEPTANCE_RADIUS = 2
 class Navigator:
     def __init__(self):
         rospy.init_node('navigator', anonymous=False)
-        rospy.loginfo(f"{rospy.get_name()}: Started")
 
         # Get the acceptance radius for the UAV, which should be an integer
         # between 1 and 20
@@ -113,6 +112,9 @@ class Navigator:
         # Counters for ROS msgs
         self.uav_goal_seq = 0
         self.uav_pose_seq = 0
+
+        # We are good to go!
+        rospy.loginfo(f"{rospy.get_name()}: Started")
 
     def set_mode(self, mode):
         self.mode = mode
