@@ -44,7 +44,7 @@ class Navigator:
         # Are we in simulator mode?
         self.sim = rospy.get_param("~sim", True)
 
-        # Get the path to the mission file
+        # Get the path to the map file
         pkg = rospkg.RosPack()
         path = pkg.get_path('semantics_manager')
         if not rospy.has_param("~map_name"):
@@ -66,28 +66,19 @@ class Navigator:
             rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
             rospy.signal_shutdown("Map config file does not exist")
             return
-        # Load the mission file
-        map_yaml_path = os.path.join(config_file)
-        with open(map_yaml_path, "r") as f:
-            map_yaml = yaml.load(f, Loader=yaml.FullLoader)
-        mission_file = os.path.join(path, "maps",
-                                    self.map_name, map_yaml["quad_plan"])
-
         rospy.loginfo(f"{rospy.get_name()}: Map: {self.map_name}")
         rospy.loginfo(f"{rospy.get_name()}: Sim: {self.sim}")
         rospy.loginfo(f"{rospy.get_name()}: AR: {self.acceptance_radius}")
 
-        # Create a path planner and mission objects
-        self.mission = route_planner.Mission(mission_file,
-                                             map_yaml["quad_plan_format"])
-        self.planner = route_planner.Path_planner(self.mission, self.map_name)
+        # Create a path planner object
+        self.planner = route_planner.Path_planner(self.map_name)
 
         # Initially, the navigator is in the "idle" mode. We will wait for an
         # order from the state machine
         self.mode = None
         self.mode_pub = rospy.Publisher("/air_router/navigator/status",
                                         String, queue_size=10)
-        self.waypoint_list = list(self.mission.waypoints.keys())
+        self.waypoint_list = list(self.planner.mission.waypoints.keys())
         self.explore_target_waypt = self.waypoint_list.copy()
         self.uav_pose = None
 
@@ -155,7 +146,7 @@ class Navigator:
             self.goto_robot_thread.join()
             self.set_mode("returning")
             # Go to the last exploration position
-            p = self.mission.waypoints[self.explore_target_waypt[0]]
+            p = self.planner.mission.waypoints[self.explore_target_waypt[0]]
             self.robot_target = Point(p[0], p[1], 60)
             self.goto_robot_thread = self.GoToTargetThread(self, self.stop_go_to_target)
             self.goto_robot_thread.daemon = True
@@ -180,7 +171,7 @@ class Navigator:
         # Convert the GPS coordinates to the map frame
         lat = data.latitude
         lon = data.longitude
-        x, y = utm.from_latlon(lat, lon)[0:2] - self.mission.origin
+        x, y = utm.from_latlon(lat, lon)[0:2] - self.planner.origin
         pose = PoseStamped()
         pose.header.frame_id = "quad"
         pose.header.stamp = rospy.Time.now()
@@ -197,7 +188,7 @@ class Navigator:
             target.header.seq = self.uav_goal_seq
             self.uav_goal_seq += 1
             target.header.stamp = rospy.Time.now()
-            waypoint = self.mission.waypoints[target_wpt]
+            waypoint = self.planner.mission.waypoints[target_wpt]
             target.point.x = waypoint[0]
             target.point.y = waypoint[1]
             target.point.z = 60
@@ -211,7 +202,7 @@ class Navigator:
 
     def arrived_at_waypoint(self, waypoint):
         if self.uav_pose is not None:
-            wp = self.mission.waypoints[waypoint]
+            wp = self.planner.mission.waypoints[waypoint]
             curr = np.array([self.uav_pose.pose.position.x,
                              self.uav_pose.pose.position.y])
             # print(f"Current position: {target}, target: {wp}")

@@ -113,7 +113,7 @@ class Path_planner():
 
         # Create mission object. Only QGC missions have GPS coordinates for the
         # origin
-        mission_file = os.path.join(path, "maps", args.map_name,
+        mission_file = os.path.join(path, "maps", map_name,
                                     map_yaml["quad_plan"])
         mission_file_format = map_yaml["quad_plan_format"]
         if map_yaml["quad_plan_format"] == "Sim":
