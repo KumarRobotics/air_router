@@ -8,9 +8,12 @@ from std_msgs.msg import String
 import threading
 from air_router.msg import Goal
 from geometry_msgs.msg import PointStamped, PoseStamped, Point
+from sensor_msgs.msg import NavSatFix
 import pdb
 import rospkg
 import numpy as np
+import utm
+from mavros_msgs.srv import SetMode, WaypointSetCurrent
 
 """Navigator:
 This node is responsible for navigating the UAV along the waypoints. It
@@ -104,9 +107,8 @@ class Navigator:
             rospy.Subscriber("/unity_ros/quadrotor/TrueState/pose",
                              PoseStamped, self.pose_callback)
         else:
-            pass
-
-        # Add a publisher with the current status of the navigator
+            rospy.Subscriber("/mavros/global_position/global",
+                             NavSatFix, self.gps_callback)
 
         # Publish the goal for the UAV. For simulation, we will just publish a
         # goal, for the real world, we will use the mavros interface
@@ -114,8 +116,14 @@ class Navigator:
             self.uav_goal = rospy.Publisher("/quadrotor/goal",
                                             PointStamped, queue_size=10)
         else:
-            pass
+            # Service proxy for /mavros/misssion/set_current
+            rospy.wait_for_service("/mavros/mission/set_current")
+            self.set_cur_wp = rospy.ServiceProxy("/mavros/mission/set_current",
+                                                 WaypointSetCurrent)
+
+        # Counters for ROS msgs
         self.uav_goal_seq = 0
+        self.uav_pose_seq = 0
 
     def set_mode(self, mode):
         self.mode = mode
@@ -134,8 +142,6 @@ class Navigator:
             # Signal the exploration thread to stop
             self.stop_exploration.set()
             self.explore_thread.join()
-            # Loiter at the current position
-            self.send_loiter_uav()
             # Go find the robot
             self.set_mode("go to robot")
             self.robot_target = data.goal.point
@@ -147,8 +153,6 @@ class Navigator:
             # Signal the go to robot thread to stop
             self.stop_go_to_target.set()
             self.goto_robot_thread.join()
-            # Loiter at the current position
-            self.send_loiter_uav()
             self.set_mode("returning")
             # Go to the last exploration position
             p = self.mission.waypoints[self.explore_target_waypt[0]]
@@ -172,6 +176,20 @@ class Navigator:
     def pose_callback(self, data):
         self.uav_pose = data
 
+    def gps_callback(self, data):
+        # Convert the GPS coordinates to the map frame
+        lat = data.latitude
+        lon = data.longitude
+        x, y = utm.from_latlon(lat, lon)[0:2] - self.mission.origin
+        pose = PoseStamped()
+        pose.header.frame_id = "quad"
+        pose.header.stamp = rospy.Time.now()
+        pose.header.seq = self.uav_pose_seq
+        self.uav_pose_seq += 1
+        pose.pose.position.x = x
+        pose.pose.position.y = y
+        self.uav_pose = pose
+
     def send_waypoint_uav(self, target_wpt):
         # For simulation purposes, we will publish the target waypoint
         if self.sim:
@@ -185,32 +203,19 @@ class Navigator:
             target.point.z = 60
             self.uav_goal.publish(target)
         else:
-            pass
-
-    def send_loiter_uav(self):
-        if self.uav_pose is None:
-            return
-        # For simulation purposes, we will publish the current position of the
-        # robot
-        if self.sim:
-            target = PointStamped()
-            target.header.seq = self.uav_goal_seq
-            self.uav_goal_seq += 1
-            target.header.stamp = rospy.Time.now()
-            target.point.x = self.uav_pose.pose.position.x
-            target.point.y = self.uav_pose.pose.position.y
-            target.point.z = self.uav_pose.pose.position.z
-            self.uav_goal.publish(target)
-        else:
-            pass
+            # Call the mavros service to set the current waypoint
+            try:
+                self.set_cur_wp(target_wpt)
+            except rospy.ServiceException as e:
+                rospy.logerr(f"Service call failed: {e}")
 
     def arrived_at_waypoint(self, waypoint):
         if self.uav_pose is not None:
             wp = self.mission.waypoints[waypoint]
-            target = np.array([self.uav_pose.pose.position.x,
-                               self.uav_pose.pose.position.y])
+            curr = np.array([self.uav_pose.pose.position.x,
+                             self.uav_pose.pose.position.y])
             # print(f"Current position: {target}, target: {wp}")
-            if np.linalg.norm(target - wp) < self.acceptance_radius:
+            if np.linalg.norm(curr - wp) < self.acceptance_radius:
                 return True
         return False
 
