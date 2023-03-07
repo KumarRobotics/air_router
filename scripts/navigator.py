@@ -10,7 +10,6 @@ from air_router.msg import Goal
 from geometry_msgs.msg import PointStamped, PoseStamped, Point
 from sensor_msgs.msg import NavSatFix
 import pdb
-import rospkg
 import numpy as np
 import utm
 from mavros_msgs.srv import SetMode, WaypointSetCurrent
@@ -45,33 +44,29 @@ class Navigator:
         self.sim = rospy.get_param("~sim", True)
 
         # Get the path to the map file
-        pkg = rospkg.RosPack()
-        path = pkg.get_path('semantics_manager')
-        if not rospy.has_param("~map_name"):
-            rospy.logfatal(f"{rospy.get_name()}: map_name is not set")
-            rospy.signal_shutdown("Map name is not set")
+        if not rospy.has_param("~world_config_path"):
+            rospy.logfatal(f"{rospy.get_name()}: world_config_path is not set")
+            rospy.signal_shutdown("World_config_path is not set")
             return
-        self.map_name = rospy.get_param("~map_name")
-        assert self.map_name is not None, "Map name is not set"
-        assert isinstance(self.map_name, str), "Map name should be a string"
-        # Does the map path exists?
-        if not os.path.exists(os.path.join(path, "maps", self.map_name)):
-            rospy.logfatal(f"{rospy.get_name()}: Map {self.map_name} does not exist")
-            rospy.signal_shutdown("Map does not exist")
-            return
+        self.world_config_path = rospy.get_param("~world_config_path")
+        rospy.loginfo(f"{rospy.get_name()}: World config path: {self.world_config_path}")
+        # Get the base path from the world_config_path
+        path = os.path.dirname(self.world_config_path)
+        with open(self.world_config_path, "r") as f:
+            world_config = yaml.safe_load(f)
+        self.map = os.path.join(path, world_config["map"])
+
         # Does the map config file exist?
-        config_file = os.path.join(path, "maps",
-                                   self.map_name, "map_config.yaml")
-        if not os.path.exists(config_file):
+        if not os.path.exists(self.map):
             rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
             rospy.signal_shutdown("Map config file does not exist")
             return
-        rospy.loginfo(f"{rospy.get_name()}: Map: {self.map_name}")
+        rospy.loginfo(f"{rospy.get_name()}: Map: {self.map}")
         rospy.loginfo(f"{rospy.get_name()}: Sim: {self.sim}")
         rospy.loginfo(f"{rospy.get_name()}: AR: {self.acceptance_radius}")
 
         # Create a path planner object
-        self.planner = route_planner.Path_planner(self.map_name)
+        self.planner = route_planner.Path_planner(self.map)
 
         # Initially, the navigator is in the "idle" mode. We will wait for an
         # order from the state machine

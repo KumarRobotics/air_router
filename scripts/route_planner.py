@@ -11,7 +11,6 @@ import utm
 import numpy as np
 import heapq
 import rospy
-import rospkg
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
 be obtained from UTM (for GPS files) or as absolute coordinates for simulation
@@ -88,19 +87,17 @@ class Mission():
 
 
 class Path_planner():
-    def __init__(self, map_name):
+    def __init__(self, map_path):
         # Store the last path for visualization purposes
         self.last_start = None
         self.last_end = None
         self.last_path = None
 
         # Get the image from semantics_manager
-        pkg = rospkg.RosPack()
-        path = pkg.get_path('semantics_manager')
-        map_yaml_path = os.path.join(path, "maps", map_name, "map_config.yaml")
-        with open(map_yaml_path, 'r') as f:
+        with open(map_path, 'r') as f:
             map_yaml = yaml.load(f, Loader=yaml.FullLoader)
-        image = os.path.join(path, "maps", map_name, map_yaml["color"])
+        # Image is in the same folder as the yaml
+        image = os.path.join(os.path.dirname(map_path), map_yaml["color"])
 
         # Get resolution (px/m) and image origin pixels from the yaml
         self.resolution = map_yaml["img_resolution"]
@@ -113,7 +110,7 @@ class Path_planner():
 
         # Create mission object. Only QGC missions have GPS coordinates for the
         # origin
-        mission_file = os.path.join(path, "maps", map_name,
+        mission_file = os.path.join(os.path.dirname(map_path),
                                     map_yaml["quad_plan"])
         mission_file_format = map_yaml["quad_plan_format"]
         if map_yaml["quad_plan_format"] == "Sim":
