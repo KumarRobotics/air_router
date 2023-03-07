@@ -61,6 +61,7 @@ class Navigator:
             rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
             rospy.signal_shutdown("Map config file does not exist")
             return
+        assert isinstance(self.sim, bool)
         rospy.loginfo(f"{rospy.get_name()}: Map: {self.map}")
         rospy.loginfo(f"{rospy.get_name()}: Sim: {self.sim}")
         rospy.loginfo(f"{rospy.get_name()}: AR: {self.acceptance_radius}")
@@ -84,8 +85,6 @@ class Navigator:
         self.stop_exploration = threading.Event()
         self.stop_go_to_target = threading.Event()
 
-        # Create subscribers for the state machine topics: goal and coordinates
-        rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
 
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
@@ -106,6 +105,10 @@ class Navigator:
             rospy.wait_for_service("/mavros/mission/set_current")
             self.set_cur_wp = rospy.ServiceProxy("/mavros/mission/set_current",
                                                  WaypointSetCurrent)
+
+        # Create subscribers _after loading services_ for the state machine
+        # topics: goal and coordinates
+        rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
 
         # Counters for ROS msgs
         self.uav_goal_seq = 0
