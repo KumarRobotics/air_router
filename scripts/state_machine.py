@@ -133,7 +133,7 @@ class StateMachine:
 
         if not rospy.has_param("~search_time"):
             rospy.logwarn(f"{rospy.get_name()}: Default search_time")
-            self.search_time = rospy.get_param("~search_time", DEFAULT_SEARCH_TIME)
+        self.search_time = rospy.get_param("~search_time", DEFAULT_SEARCH_TIME)
 
         if not rospy.has_param("~alive_time"):
             rospy.logwarn(f"{rospy.get_name()}: Default alive_time")

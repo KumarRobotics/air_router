@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
-  <arg name="ns" default="quadrotor"/>
   <arg name="output" default="screen"/>
 
   <arg name="initial_expl_time" default="300"/>
@@ -11,19 +10,17 @@
   <arg name="robot_list" default="io,callisto,europa"/>
   <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
 
-  <group ns="$(arg ns)">
-    <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">
-      <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
-      <param name="sim" value="$(arg sim)"/>
-      <param name="world_config_path" value="$(arg world_config_path)"/>
-    </node>
+  <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">
+    <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
+    <param name="sim" value="$(arg sim)"/>
+    <param name="world_config_path" value="$(arg world_config_path)"/>
+  </node>
 
-    <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
-      <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
-      <param name="short_exploration_time" value="$(arg short_expl_time)"/>
-      <param name="search_time" value="$(arg search_time)"/>
-      <param name="robot_list" value="$(arg robot_list)"/>
-    </node>
-  </group>
+  <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
+    <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
+    <param name="short_exploration_time" value="$(arg short_expl_time)"/>
+    <param name="search_time" value="$(arg search_time)"/>
+    <param name="robot_list" value="$(arg robot_list)"/>
+  </node>
 
 </launch>
