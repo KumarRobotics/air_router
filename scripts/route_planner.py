@@ -77,7 +77,9 @@ class Mission():
             self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
                           if not i["inclusion"]]
             self.rally = None
-            self.waypoints = yml["waypoints"]
+            self.waypoints = {w: [yml["waypoints"][w][0], yml["waypoints"][w][1]]
+                              for w in yml["waypoints"]}
+            self.altitude = {w: yml["waypoints"][w][2] for w in yml["waypoints"]}
             self.fence = yml["geoFence"]["polygons"][0]
             if not self.fence["inclusion"]:
                 sys.exit("Error: the geoFence is not an inclusion zone")
@@ -394,7 +396,7 @@ if __name__ == "__main__":
 
     # Create a path planner object
     q = Path_planner(map_path)
-    # q.display_points(waypoints=True, noFly=True, origin=True)
+    q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
     for j in range(100):

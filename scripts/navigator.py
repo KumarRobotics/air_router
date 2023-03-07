@@ -145,7 +145,8 @@ class Navigator:
             self.set_mode("returning")
             # Go to the last exploration position
             p = self.planner.mission.waypoints[self.explore_target_waypt[0]]
-            self.robot_target = Point(p[0], p[1], 60)
+            alt = self.planner.mission.altitude[self.explore_target_waypt[0]]
+            self.robot_target = Point(p[0], p[1], alt)
             self.goto_robot_thread = self.GoToTargetThread(self, self.stop_go_to_target)
             self.goto_robot_thread.daemon = True
             self.goto_robot_thread.start()
@@ -187,9 +188,10 @@ class Navigator:
             self.uav_goal_seq += 1
             target.header.stamp = rospy.Time.now()
             waypoint = self.planner.mission.waypoints[target_wpt]
+            alt = self.planner.mission.altitude[target_wpt]
             target.point.x = waypoint[0]
             target.point.y = waypoint[1]
-            target.point.z = 60
+            target.point.z = alt
             self.uav_goal.publish(target)
         else:
             # Call the mavros service to set the current waypoint
