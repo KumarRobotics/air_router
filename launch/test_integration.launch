@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+
+  <arg name="output" default="screen"/>
+
+  <!-- Load the default titan file -->
+  <include file="$(find air_router)/launch/titan.launch" pass_all_args="True">
+    <arg name="initial_expl_time" default="10"/>
+    <arg name="short_expl_time" default="10"/>
+    <arg name="search_time" default="10"/>
+    <arg name="acceptance_radius" default="2"/>
+    <arg name="sim" default="true"/>
+  </include>
+
+  <!-- Load the test node -->
+
+  <!--
+  <node pkg="air_router" type="test_integration.py" name="test_integration" output="$(arg output)">
+    <param name="map_name" value="dynamic_unity_urban"/>
+  </node>
+  -->
+
+</launch>

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 import rospy
-from std_msgs.msg import Empty, Float64MultiArray, String
+from std_msgs.msg import Empty, String
 from geometry_msgs.msg import PoseWithCovarianceStamped, PointStamped
 from nav_msgs.msg import Path
 import threading
-from enum import Enum
+from enum import Enum, auto
 from air_router.msg import Goal
 import pdb
-import numpy as np
 
 """ State machine node
 The state machine node is responsible for the high level control of the aerial
@@ -85,7 +84,6 @@ class Robot:
         else:
             last_destination.point = msg.poses[-1].pose.position
         last_destination.header.frame_id = self.robot_name
-        last_destination_ts = rospy.get_time()
         self.last_destination = last_destination
 
         # Call the heartbeat function, as we got information from the robot
@@ -98,7 +96,7 @@ class Robot:
 
     def where_to_find_me(self):
         if (self.last_destination_ts is not None and
-            self.last_pose_ts is not None):
+                self.last_pose_ts is not None):
             if self.last_destination_ts >= self.last_pose_ts:
                 return self.last_destination
             else:
@@ -112,11 +110,11 @@ class Robot:
 
 class StateMachine:
     class State(Enum):
-        idle = 0
-        exploration_initial = 1
-        exploration_short = 2
-        search = 3
-        wait_search = 4
+        idle = auto()
+        exploration_initial = auto()
+        exploration_short = auto()
+        search = auto()
+        wait_search = auto()
 
     def __init__(self):
         rospy.init_node("state_machine")
@@ -124,21 +122,25 @@ class StateMachine:
         # get parameters for the node
         if not rospy.has_param("~initial_exploration_time"):
             rospy.logwarn(f"{rospy.get_name()}: Default initial_exploration_time")
-        self.initial_exploration_time = rospy.get_param("~initial_exploration_time",
-                                                        DEFAULT_INITIAL_EXPLORATION_TIME)
+        self.initial_expl_time = rospy.get_param("~initial_exploration_time",
+                                                 DEFAULT_INITIAL_EXPLORATION_TIME)
+        rospy.loginfo(f"{rospy.get_name()}: initial_exploration_time: {self.initial_expl_time}")
 
         if not rospy.has_param("~short_exploration_time"):
             rospy.logwarn(f"{rospy.get_name()}: Default short_exploration_time")
-        self.short_exploration_time = rospy.get_param("~short_exploration_time",
-                                                      DEFAULT_SHORT_EXPLORATION_TIME)
+        self.short_expl_time = rospy.get_param("~short_exploration_time",
+                                               DEFAULT_SHORT_EXPLORATION_TIME)
+        rospy.loginfo(f"{rospy.get_name()}: short_exploration_time: {self.short_expl_time}")
 
         if not rospy.has_param("~search_time"):
             rospy.logwarn(f"{rospy.get_name()}: Default search_time")
         self.search_time = rospy.get_param("~search_time", DEFAULT_SEARCH_TIME)
+        rospy.loginfo(f"{rospy.get_name()}: search_time: {self.search_time}")
 
         if not rospy.has_param("~alive_time"):
             rospy.logwarn(f"{rospy.get_name()}: Default alive_time")
         self.alive_time = rospy.get_param("~alive_time", DEFAULT_ALIVE_TIME)
+        rospy.loginfo(f"{rospy.get_name()}: alive_time: {self.alive_time}")
 
         if not rospy.has_param("~robot_list"):
             rospy.logfatal(f"{rospy.get_name()}: No robot_list parameter")
@@ -157,8 +159,7 @@ class StateMachine:
 
         # Subscribe to the navigator state
         rospy.Subscriber("/air_router/navigator/state", String,
-                         self.nav_status_callback)
-        self.nav_status = None
+                         self.update_state)
 
         # Robot list is a list of comma separated robots. Generate a list
         rlist = rospy.get_param("~robot_list").split(",")
@@ -168,24 +169,29 @@ class StateMachine:
                            for r in rlist]
         rospy.loginfo(f"{rospy.get_name()}: Robot list: {', '.join(rlist)}")
 
-        # Create a variable protected by a lock for the state
+        # Create a state variable
         self.state = self.State.idle
-        self.state_lock = threading.Lock()
 
-        # timestamp when we started the last exploration or search
-        self.last_ts = None
+        # Timer object stores the current timer
+        self.timer = None
 
         # Did we find a robot during the last search?
         self.found_robot = False
 
-        # Create a timer to update the state machine regularly
-        self.timer = rospy.Timer(rospy.Duration(1), self.update_state)
+        # Fail robot search at most 5 times
+        self.fail_count = 0
 
         # We are good to go!
         rospy.loginfo(f"{rospy.get_name()}: Started")
 
-    def nav_status_callback(self, msg):
-        self.nav_status = msg.data
+        # TODO: use the start condition instead of calling the function to
+        # trigger the change to exploration
+        rospy.sleep(2)
+        self.update_state(None)
+
+    def timer_callback(self, event):
+        self.timer = None
+        self.update_state("timeout")
 
     def robot_found_callback(self):
         self.found_robot = True
@@ -194,23 +200,32 @@ class StateMachine:
         self.start = True
 
     def set_state(self, state):
-        self.state_lock.acquire()
         self.state = state
-        self.state_lock.release()
 
     def state_exploration_short(self):
-        self.last_ts = rospy.get_time()
+        # First, cancel the timer
+        if self.timer is not None:
+            self.timer.shutdown()
+        # Go explore
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_short)
         rospy.loginfo(f"{rospy.get_name()}: Short Expl - Starting")
+        # Timer will be manually started once we resume exploration
 
     def state_exploration_initial(self):
-        self.last_ts = rospy.get_time()
+        # First, cancel the timer
+        if self.timer is not None:
+            self.timer.shutdown()
+        # Go explore
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_initial)
+        rospy.Timer(rospy.Duration(self.initial_expl_time),
+                    self.timer_callback, oneshot=True)
         rospy.loginfo(f"{rospy.get_name()}: Initial Expl - Starting")
 
     def state_search(self):
+        if self.timer is not None:
+            self.timer.shutdown()
         self.found_robot = False
         # Find the robot to search in a round robin fashion
         robot_to_find = None
@@ -227,42 +242,53 @@ class StateMachine:
         # if we did not find a robot, go back to exploration short
         # but be angry about it
         if robot_to_find is None:
-            rospy.last_ts = rospy.get_time()
-            rospy.logwarn(f"{rospy.get_name()}: Search - No robot to search")
+            if self.fail_count > 5:
+                rospy.logfatal(f"{rospy.get_name()}: Search - " +
+                               "Too many failed searches, shutting down")
+                rospy.signal_shutdown("Too many failed searches")
+                return
+            self.fail_count += 1
+            rospy.logwarn(f"{rospy.get_name()}: No robot to search - Count: {self.fail_count}")
+            self.state_exploration_short()
             return
 
-        rospy.logwarn(f"{rospy.get_name()}: Search - finding robot {robot_to_find.robot_name}")
         # We did find a robot, go search for it
+        rospy.logwarn(f"{rospy.get_name()}: Search - " +
+                      "finding robot {robot_to_find.robot_name}")
         self.set_state(self.State.search)
         robot_to_find.robot_searched = True
         goal = robot_to_find.where_to_find_me()
+        rospy.Timer(rospy.Duration(self.search_time), self.timer_callback,
+                    oneshot=True)
         self.goal_pub.publish(Goal("go to robot", goal))
-        self.last_ts = rospy.get_time()
 
-    def state_wait_search(self):
+    def state_wait_after_search(self):
         # We are just waiting, do nothing
         rospy.loginfo(f"{rospy.get_name()}: Search Wait - Starting")
         self.set_state(self.State.wait_search)
 
-    def update_state(self, event):
+    def update_state(self, msg):
         if self.state == self.State.idle:
             # if self.start:
             #     self.state_exploration_initial()
             self.state_exploration_initial()
         elif self.state == self.State.exploration_initial:
-            if rospy.get_time() - self.last_ts > self.initial_exploration_time:
+            if msg == "timeout" or msg == "explore_end":
                 self.state_search()
         elif self.state == self.State.exploration_short:
-            if rospy.get_time() - self.last_ts > self.short_exploration_time:
+            # Wait for the go_to_target_end to start timer
+            if msg == "go_to_target_end":
+                rospy.Timer(rospy.Duration(self.short_expl_time),
+                            self.timer_callback, oneshot=True)
+            if msg == "timeout" or msg == "explore_end":
                 self.state_search()
         elif self.state == self.State.search:
-            self.state_wait_search()
+            if msg == "go_to_target_end":
+                self.state_wait_after_search()
+            if msg == "timeout":
+                self.state_exploration_short()
         elif self.state == self.State.wait_search:
-            # reset last_ts if the quad hasn't reached the waypoint
-            if self.nav_status is not None and self.nav_status == "returning":
-                self.last_ts = rospy.get_time()
-            if (self.found_robot or
-                    (rospy.get_time() - self.last_ts > self.search_time)):
+            if msg == "timeout":
                 self.state_exploration_short()
 
 
