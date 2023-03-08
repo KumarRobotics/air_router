@@ -83,22 +83,42 @@ if __name__ == "__main__":
     curr_wp_expl = min(wp.keys())
     rospy.sleep(1)
     pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
+    print("Publishing explore")
     goal_pub.publish(create_goal_msg("explore"))
     for i in range(10):
         print("Publishing waypoint %d" % curr_wp_expl)
         pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
         curr_wp_expl += 1
-        rospy.sleep(.1)
+        rospy.sleep(.2)
+    print("Publishing Go To Robot")
     goal_pub.publish(create_goal_msg("go to robot", [0, 0]))
-    rospy.sleep(.1)
+    rospy.sleep(.2)
+    print("Publishing waypoint 10")
     pose_pub.publish(create_pose_msg(wp[10]))
-    rospy.sleep(.1)
+    rospy.sleep(.2)
+    print("Publishing waypoint 6")
     pose_pub.publish(create_pose_msg(wp[6]))
-    rospy.sleep(.1)
+    rospy.sleep(.2)
+    print("Publishing explore")
     goal_pub.publish(create_goal_msg("explore"))
-    rospy.sleep(.1)
+    rospy.sleep(.2)
+    print("Publishing waypoint 12")
     pose_pub.publish(create_pose_msg(wp[12]))
-    rospy.sleep(.1)
+    rospy.sleep(.2)
+    for i in range(20):
+        try:
+            pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
+            print("Publishing waypoint %d" % curr_wp_expl)
+        except:
+            break
+        curr_wp_expl += 1
+        rospy.sleep(.2)
+    print("Publishing Go To Robot")
+    goal_pub.publish(create_goal_msg("go to robot", [0, 0]))
+    rospy.sleep(.2)
+    print("Publishing Go To Robot")
+    goal_pub.publish(create_goal_msg("go to robot", [100, 0]))
+    rospy.sleep(.2)
     rospy.sleep(5)
 
 

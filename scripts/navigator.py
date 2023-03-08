@@ -36,7 +36,9 @@ class Navigator:
     class Mode(Enum):
         init = auto()
         explore = auto()
+        explore_end = auto()
         go_to_target = auto()
+        go_to_target_end = auto()
         transition = auto()
 
     def __init__(self):
@@ -93,6 +95,7 @@ class Navigator:
         # List of waypoints for exploration
         self.waypoint_list = list(self.planner.mission.waypoints.keys())
         self.explore_target_waypt = self.waypoint_list.copy()
+        self.end_waypt = self.explore_target_waypt[-1]
 
         # UAV pose keeps the pose of the UAV in standard coordinates:
         self.uav_pose = None
@@ -139,6 +142,7 @@ class Navigator:
         self.mode_lock.acquire()
         self.mode = mode
         self.mode_lock.release()
+        rospy.loginfo(f"{rospy.get_name()}: Mode: {mode.name}")
         self.mode_pub.publish(mode.name)
 
     def goal_callback(self, data):
@@ -155,8 +159,19 @@ class Navigator:
         elif self.mode == self.Mode.explore and data.action == "explore":
             return
         elif self.mode == self.Mode.go_to_target and data.action == "go to robot":
-            return
-        elif self.mode == self.Mode.explore and data.action == "go to robot":
+            # Signal the go to robot thread to stop
+            self.stop_go_to_target.set()
+            self.goto_target_thread.join()
+            # Go find the robot
+            self.robot_target = data.goal.point
+            self.goto_target_thread = self.GoToTargetThread(self,
+                                                           self.stop_go_to_target)
+            self.goto_target_thread.daemon = True
+            self.set_mode(self.Mode.go_to_target)
+            self.goto_target_thread.start()
+        elif self.mode == self.Mode.explore or \
+                self.mode == self.Mode.explore_end \
+                and data.action == "go to robot":
             # Signal the exploration thread to stop
             self.stop_exploration.set()
             self.explore_thread.join()
@@ -181,9 +196,9 @@ class Navigator:
             self.goto_target_thread.start()
             self.goto_target_thread.join()
             # Resume exploration
-            self.set_mode(self.Mode.explore)
             self.explore_thread = self.ExplorationThread(self,
                                                          self.stop_exploration)
+            self.set_mode(self.Mode.explore)
             self.explore_thread.daemon = True
             self.explore_thread.start()
         else:
@@ -264,8 +279,10 @@ class Navigator:
                     # Wait to arrive at the waypoint
                     rate.sleep()
                 if self.outer.arrived_at_waypoint(target):
+                    if target == self.outer.end_waypt:
+                        self.outer.set_mode(self.outer.Mode.explore_end)
+                        return
                     self.outer.explore_target_waypt = self.outer.explore_target_waypt[1:] + [target]
-            # rospy.loginfo(f"{rospy.get_name()}: Exploration - End")
 
     class GoToTargetThread(threading.Thread):
         def __init__(self, outer, stop_event):
@@ -321,7 +338,8 @@ class Navigator:
                     # Wait to arrive at the waypoint
                     rate.sleep()
                 # Check if we made it to the end
-                if len(route) == 0:
+                if len(route) == 0 and self.outer.arrived_at_waypoint(target):
+                    self.outer.set_mode(self.outer.Mode.go_to_target_end)
                     rospy.loginfo(f"{rospy.get_name()}: GoToTarget: reached goal")
                     return
 
