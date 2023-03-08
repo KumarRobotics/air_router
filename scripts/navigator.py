@@ -12,6 +12,7 @@ from sensor_msgs.msg import NavSatFix
 import pdb
 import numpy as np
 import utm
+from enum import Enum, auto
 from mavros_msgs.srv import SetMode, WaypointSetCurrent
 
 """Navigator:
@@ -25,6 +26,19 @@ DEFAULT_ACCEPTANCE_RADIUS = 2
 
 
 class Navigator:
+    # Modes for the navigator:
+    # Init: The navigator is waiting for a command from the state machine
+    # Explore: the navigator is exploring the map, going sequentially through
+    #          the waypoints
+    # GoToTarget: the navigator is going to the target waypoint
+    # Transition: similar to GoToTarget, but we are not going to a target
+    #             waypoint, we are transitioning from GoToTarget to Explore
+    class Mode(Enum):
+        init = auto()
+        explore = auto()
+        go_to_target = auto()
+        transition = auto()
+
     def __init__(self):
         rospy.init_node('navigator', anonymous=False)
 
@@ -68,13 +82,19 @@ class Navigator:
         # Create a path planner object
         self.planner = route_planner.Path_planner(self.map)
 
-        # Initially, the navigator is in the "idle" mode. We will wait for an
+        # Initially, the navigator is in the init mode. We will wait for an
         # order from the state machine
-        self.mode = None
+        # Mode gets published so other nodes can use it
+        self.mode = self.Mode.init
+        self.mode_lock = threading.Lock()
         self.mode_pub = rospy.Publisher("/air_router/navigator/status",
                                         String, queue_size=10)
+
+        # List of waypoints for exploration
         self.waypoint_list = list(self.planner.mission.waypoints.keys())
         self.explore_target_waypt = self.waypoint_list.copy()
+
+        # UAV pose keeps the pose of the UAV in standard coordinates:
         self.uav_pose = None
 
         # Target goal for the UAV in GoToTarget mode
@@ -83,7 +103,6 @@ class Navigator:
         # Create threads for the different modes
         self.stop_exploration = threading.Event()
         self.stop_go_to_target = threading.Event()
-
 
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
@@ -117,44 +136,52 @@ class Navigator:
         rospy.loginfo(f"{rospy.get_name()}: Started")
 
     def set_mode(self, mode):
+        self.mode_lock.acquire()
         self.mode = mode
-        self.mode_pub.publish(self.mode)
+        self.mode_lock.release()
+        self.mode_pub.publish(mode.name)
 
     def goal_callback(self, data):
-        if self.mode is None and data.action == "explore":
-            self.set_mode("explore")
+        # Check that goal is either "explore" or "go to robot"
+        assert data.action in ["explore", "go to robot"]
+        if self.mode is self.Mode.init and data.action == "explore":
             # initial explore
             self.explore_thread = self.ExplorationThread(self,
                                                          self.stop_exploration)
             self.explore_thread.daemon = True
+            self.set_mode(self.Mode.explore)
             self.explore_thread.start()
 
-        elif self.mode == "explore" and data.action == "go to robot":
+        elif self.mode == self.Mode.explore and data.action == "explore":
+            return
+        elif self.mode == self.Mode.go_to_target and data.action == "go to robot":
+            return
+        elif self.mode == self.Mode.explore and data.action == "go to robot":
             # Signal the exploration thread to stop
             self.stop_exploration.set()
             self.explore_thread.join()
             # Go find the robot
-            self.set_mode("go to robot")
             self.robot_target = data.goal.point
-            self.goto_robot_thread = self.GoToTargetThread(self,
+            self.goto_target_thread = self.GoToTargetThread(self,
                                                            self.stop_go_to_target)
-            self.goto_robot_thread.daemon = True
-            self.goto_robot_thread.start()
-        elif self.mode == "go to robot" and data.action == "explore":
+            self.goto_target_thread.daemon = True
+            self.set_mode(self.Mode.go_to_target)
+            self.goto_target_thread.start()
+        elif self.mode == self.Mode.go_to_target and data.action == "explore":
             # Signal the go to robot thread to stop
             self.stop_go_to_target.set()
-            self.goto_robot_thread.join()
-            self.set_mode("returning")
+            self.goto_target_thread.join()
+            self.set_mode(self.Mode.transition)
             # Go to the last exploration position
             p = self.planner.mission.waypoints[self.explore_target_waypt[0]]
             alt = self.planner.mission.altitude[self.explore_target_waypt[0]]
             self.robot_target = Point(p[0], p[1], alt)
-            self.goto_robot_thread = self.GoToTargetThread(self, self.stop_go_to_target)
-            self.goto_robot_thread.daemon = True
-            self.goto_robot_thread.start()
-            self.goto_robot_thread.join()
+            self.goto_target_thread = self.GoToTargetThread(self, self.stop_go_to_target)
+            self.goto_target_thread.daemon = True
+            self.goto_target_thread.start()
+            self.goto_target_thread.join()
             # Resume exploration
-            self.set_mode("explore")
+            self.set_mode(self.Mode.explore)
             self.explore_thread = self.ExplorationThread(self,
                                                          self.stop_exploration)
             self.explore_thread.daemon = True
@@ -207,9 +234,11 @@ class Navigator:
             wp = self.planner.mission.waypoints[waypoint]
             curr = np.array([self.uav_pose.pose.position.x,
                              self.uav_pose.pose.position.y])
-            # print(f"Current position: {target}, target: {wp}")
+            # rospy.loginfo(f"Current position: {curr}, target: {wp}")
             if np.linalg.norm(curr - wp) < self.acceptance_radius:
                 return True
+        else:
+            rospy.logwarn(f"{rospy.get_name()}: UAV pose not received yet")
         return False
 
     class ExplorationThread(threading.Thread):
