@@ -23,20 +23,31 @@ DEFAULT_SEARCH_TIME = 1*60
 # Defaults: A robot is alive if we communicated in the last 20 minutes
 DEFAULT_ALIVE_TIME = 20*60
 
+# Defaults: we will prefer searching for the robot on its target position
+# instead of its current position if the target position is at most two
+# minutes older than the current position.
+
+DEFAULT_PREFER_TARGET_TIME = 2*60
+
 
 class Robot:
     """ We create one Robot class per ground robot that we are tracking """
     def __init__(self, robot_name, update_callback, alive_time):
         self.robot_name = robot_name
-        self.last_heartbeat = None
         self.last_pose = None
         self.last_pose_ts = None
         self.last_destination = None
         self.last_destination_ts = None
         self.alive_time = alive_time
 
-        # Create a ROS subscriber for the transmit heartbeat. The database will
-        # transmit a hearbeat every time a communication happens with the robot
+        # We will use the last heartbeat to determine if the robot is alive,
+        # and to determine if we found it (when it is updated)self.
+        #
+        # TODO(fernando): currently, the last_heartbeat is updated upon
+        # reception of any message and thus a robot heartbeat may be updated
+        # when we communicate with other robots. A fix for this is that heartbeat
+        # is updated only when we receive a message from the robot itself.
+        self.last_heartbeat = None
 
         # Create a subscriber for the robot pose
         rospy.Subscriber(f"{self.robot_name}/top_down_render/pose_est",
@@ -97,7 +108,8 @@ class Robot:
     def where_to_find_me(self):
         if (self.last_destination_ts is not None and
                 self.last_pose_ts is not None):
-            if self.last_destination_ts >= self.last_pose_ts:
+            if self.last_destination_ts >= \
+                    self.last_pose_ts - DEFAULT_PREFER_TARGET_TIME:
                 return self.last_destination
             else:
                 return self.last_pose
