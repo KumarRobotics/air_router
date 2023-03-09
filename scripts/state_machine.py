@@ -214,8 +214,7 @@ class StateMachine:
 
     def state_exploration_short(self):
         # First, cancel the timer
-        if self.timer is not None:
-            self.timer.shutdown()
+        self.reset_timer()
         # Go explore
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_short)
@@ -224,8 +223,7 @@ class StateMachine:
 
     def state_exploration_initial(self):
         # First, cancel the timer
-        if self.timer is not None:
-            self.timer.shutdown()
+        self.reset_timer()
         # Go explore
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_initial)

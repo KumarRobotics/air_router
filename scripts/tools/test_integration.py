@@ -57,7 +57,7 @@ if __name__ == "__main__":
 
     # Create publisher for /unity_ros/quadrotor/Truestate/pose
     pose_pub = rospy.Publisher("/unity_ros/quadrotor/TrueState/pose",
-                               PoseStamped, queue_size=10)
+                               PoseStamped, queue_size=1)
 
     # Create a publisher for callisto and io poses
     callisto_pose_pub = rospy.Publisher("/callisto/top_down_render/pose_est",
@@ -77,6 +77,7 @@ if __name__ == "__main__":
     # Send initial explore command
     curr_wp_expl = min(wp.keys())
     rospy.loginfo(f"{rospy.get_name()}: Publishing robot pose")
+    rospy.sleep(1)
     pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
     rospy.sleep(1)
 
@@ -123,6 +124,12 @@ if __name__ == "__main__":
 
     # Publish Io pose
     io_pose_pub.publish(create_robot_pose("io", wp[10]))
+    rospy.sleep(10)
+    publish_waypoint(23)
+    publish_waypoint(19)
+    publish_waypoint(13)
+    publish_waypoint(10)
+
 
 
 

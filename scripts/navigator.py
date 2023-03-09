@@ -178,8 +178,9 @@ class Navigator:
             self.set_mode(self.Mode.go_to_target)
             self.goto_target_thread.start()
         elif self.mode == self.Mode.explore or \
-                self.mode == self.Mode.explore_end \
-                and data.action == "go to robot":
+                self.mode == self.Mode.explore_end or \
+                self.mode == self.Mode.go_to_target_end and \
+                data.action == "go to robot":
             # Signal the exploration thread to stop
             self.stop_exploration.set()
             self.explore_thread.join()
