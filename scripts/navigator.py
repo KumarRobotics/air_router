@@ -136,8 +136,8 @@ class Navigator:
         rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
 
         # Create the visualization topic to debug the navigator
-        self.vis_pub = rospy.Publisher("/air_router/navigator/visualization",
-                                       Image, queue_size=10)
+        self.vis_pub = rospy.Publisher("/air_router/navigator/viz",
+                                       Image, queue_size=1)
 
         # Counters for ROS msgs
         self.uav_goal_seq = 0

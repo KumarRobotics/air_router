@@ -23,4 +23,9 @@
     <param name="robot_list" value="$(arg robot_list)"/>
   </node>
 
+  <node pkg="image_transport" type="republish"
+    name="republish" required="true"
+    args="raw in:=/air_router/navigator/viz compressed out:=/air_router/navigator/viz">
+  </node>
+
 </launch>
