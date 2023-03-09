@@ -336,6 +336,7 @@ class Navigator:
 
             # Get the current position of the robot and target
             pos = self.outer.uav_pose.pose.position
+
             robot_target = self.outer.robot_target
 
             # Get the trajectory from the current position to the target
@@ -378,7 +379,10 @@ class Navigator:
                             self.outer.uav_pose.pose.position.y]
                 quad_px = self.outer.planner.scale_points(quad_pos[0],
                                                           quad_pos[1])
+                robot_target_px = self.outer.planner.scale_points(robot_target.x,
+                                                                  robot_target.y)
                 img = cv2.circle(img, tuple(quad_px), 5, (0, 0, 255), -1)
+                img = cv2.circle(img, tuple(robot_target_px), 5, (0, 255, 0), -1)
                 image_msg = bridge.cv2_to_imgmsg(img, encoding='bgr8')
                 self.outer.vis_pub.publish(image_msg)
 

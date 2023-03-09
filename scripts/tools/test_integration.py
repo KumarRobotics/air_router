@@ -33,8 +33,8 @@ def create_robot_pose(robot, coord):
     pose.header.seq = create_robot_pose.count
     create_robot_pose.count += 1
     pose.header.stamp = rospy.Time.now()
-    pose.pose.pose.position.x = coord[0]
-    pose.pose.pose.position.y = coord[1]
+    pose.pose.pose.position.x = coord[0] + 5
+    pose.pose.pose.position.y = coord[1] + 5
     return pose
 
 if __name__ == "__main__":
