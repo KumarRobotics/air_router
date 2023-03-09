@@ -15,9 +15,6 @@ import numpy as np
 import utm
 from enum import Enum, auto
 from mavros_msgs.srv import SetMode, WaypointSetCurrent
-from cv_bridge import CvBridge
-
-bridge = CvBridge()
 
 """Navigator:
 This node is responsible for navigating the UAV along the waypoints. It
@@ -28,6 +25,14 @@ creates a plan for performing the action using the router.
 # Default acceptance radius for the UAV in meters
 DEFAULT_ACCEPTANCE_RADIUS = 2
 
+def cv_to_ros(img):
+    image_msg = Image()
+    image_msg.encoding = "bgr8"
+    image_msg.height = img.shape[0]
+    image_msg.width = img.shape[1]
+    image_msg.step = image_msg.width * 3
+    image_msg.data = img.tobytes()
+    return image_msg
 
 class Navigator:
     # Modes for the navigator:
@@ -301,8 +306,7 @@ class Navigator:
                 quad_px = self.outer.planner.scale_points(quad_pos[0],
                                                           quad_pos[1])
                 img = cv2.circle(img, tuple(quad_px), 5, (0, 0, 255), -1)
-                image_msg = bridge.cv2_to_imgmsg(img, encoding='bgr8')
-                self.outer.vis_pub.publish(image_msg)
+                self.outer.vis_pub.publish(cv_to_ros(img))
 
                 rospy.loginfo(f"{rospy.get_name()}: Exploration - Going to waypoint %s", target)
                 while (not self.outer.arrived_at_waypoint(target) and
@@ -383,8 +387,7 @@ class Navigator:
                                                                   robot_target.y)
                 img = cv2.circle(img, tuple(quad_px), 5, (0, 0, 255), -1)
                 img = cv2.circle(img, tuple(robot_target_px), 5, (0, 255, 0), -1)
-                image_msg = bridge.cv2_to_imgmsg(img, encoding='bgr8')
-                self.outer.vis_pub.publish(image_msg)
+                self.outer.vis_pub.publish(cv_to_ros(img))
 
                 while (not self.outer.arrived_at_waypoint(target) and
                        not rospy.is_shutdown() and
