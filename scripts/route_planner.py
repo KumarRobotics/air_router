@@ -11,6 +11,7 @@ import utm
 import numpy as np
 import heapq
 import rospy
+import threading
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
 be obtained from UTM (for GPS files) or as absolute coordinates for simulation
@@ -265,14 +266,13 @@ class Path_planner():
                 end_node = r
 
         # If start and end node are the same, return a list with a single item
-        self.last_lock.lock()
-        self.last_start = start_latlon
-        self.last_end = end_latlon
-        if start_node == end_node:
-            self.last_path = [start_node]
-        else:
-            self.last_path = self.graph[start_node]["path"][end_node]
-        self.last_lock.unlock()
+        with self.last_lock:
+            self.last_start = start_latlon
+            self.last_end = end_latlon
+            if start_node == end_node:
+                self.last_path = [start_node]
+            else:
+                self.last_path = self.graph[start_node]["path"][end_node]
         return self.last_path
 
     def dijkstra(self, start):
@@ -342,7 +342,6 @@ class Path_planner():
             img = cv2.polylines(img, [fence], True, (0, 0, 0), 3)
 
         if routes:
-            self.last_lock.lock()
             for route in self.graph:
                 for neigh in self.graph[route]["neigh"]:
                     lat, long = self.graph[route]["latlon"]
@@ -355,35 +354,35 @@ class Path_planner():
                                   cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 0, 255))
 
         if plan:
-            if self.last_end is not None:
-                last_x_end, last_y_end = self.scale_points(self.last_end[0],
-                                                           self.last_end[1])
-                img = cv2.circle(img, (last_x_end, last_y_end),
-                                 5, (0, 255, 255), -1)
+            with self.last_lock:
+                if self.last_end is not None:
+                    last_x_end, last_y_end = self.scale_points(self.last_end[0],
+                                                               self.last_end[1])
+                    img = cv2.circle(img, (last_x_end, last_y_end),
+                                     5, (0, 255, 255), -1)
 
-            if self.last_start is not None:
-                last_x_start, last_y_start = self.scale_points(self.last_start[0],
-                                                               self.last_start[1])
-                img = cv2.circle(img, (last_x_start, last_y_start),
-                                 5, (0, 255, 255), -1)
+                if self.last_start is not None:
+                    last_x_start, last_y_start = self.scale_points(self.last_start[0],
+                                                                   self.last_start[1])
+                    img = cv2.circle(img, (last_x_start, last_y_start),
+                                     5, (0, 255, 255), -1)
 
-            if self.last_path is not None:
-                for i, node in enumerate(self.last_path):
-                    lat, long = self.graph[node]["latlon"]
-                    x, y = self.scale_points(lat, long)
-                    img = cv2.circle(img, (x, y), 5, (0, 255, 255), -1)
-                    if i > 0:
-                        lat, long = self.graph[self.last_path[i-1]]["latlon"]
-                        x2, y2 = self.scale_points(lat, long)
-                        cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 2)
-                    if i == 0:
-                        cv2.line(img, (x, y),
-                                 (last_x_start, last_y_start),
-                                 (0, 255, 255), 2)
-                # Plot a line connecting the end and start
-                cv2.line(img, (x, y), (last_x_end, last_y_end),
-                         (0, 255, 255), 2)
-            self.last_lock.unlock()
+                if self.last_path is not None:
+                    for i, node in enumerate(self.last_path):
+                        lat, long = self.graph[node]["latlon"]
+                        x, y = self.scale_points(lat, long)
+                        img = cv2.circle(img, (x, y), 5, (0, 255, 255), -1)
+                        if i > 0:
+                            lat, long = self.graph[self.last_path[i-1]]["latlon"]
+                            x2, y2 = self.scale_points(lat, long)
+                            cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 2)
+                        if i == 0:
+                            cv2.line(img, (x, y),
+                                     (last_x_start, last_y_start),
+                                     (0, 255, 255), 2)
+                    # Plot a line connecting the end and start
+                    cv2.line(img, (x, y), (last_x_end, last_y_end),
+                             (0, 255, 255), 2)
         if not get_image:
             cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
             cv2.imshow('Pennovation', img)
