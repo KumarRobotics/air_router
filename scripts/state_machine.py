@@ -56,7 +56,7 @@ class Robot:
         self.last_heartbeat = rospy.get_time()
         if self.robot_searched:
             self.robot_searched = False
-            rospy.loginfo(f"{rospy.get_name()}: {self.robot_name} found")
+            rospy.logwarn(f"{rospy.get_name()}: {self.robot_name} found")
             self.update_callback()
 
     def pose_callback(self, msg):
@@ -175,26 +175,36 @@ class StateMachine:
         # Timer object stores the current timer
         self.timer = None
 
-        # Did we find a robot during the last search?
-        self.found_robot = False
-
         # Fail robot search at most 5 times
         self.fail_count = 0
+
+        # Current target robot
+        self.robot_target = None
+
+        # Did we finish the exploration?
+        self.exploration_finished = False
 
         # We are good to go!
         rospy.loginfo(f"{rospy.get_name()}: Started")
 
-        # TODO: use the start condition instead of calling the function to
-        # trigger the change to exploration
-        rospy.sleep(2)
-        self.update_state(None)
-
     def timer_callback(self, event):
         self.timer = None
-        self.update_state("timeout")
+        self.update_state(String("timeout"))
+
+    def set_timer(self, duration):
+        self.reset_timer()
+        self.timer = rospy.Timer(rospy.Duration(duration), self.timer_callback,
+                                 oneshot=True)
+
+    def reset_timer(self):
+        if self.timer is not None:
+            self.timer.shutdown()
+            self.timer = None
 
     def robot_found_callback(self):
-        self.found_robot = True
+        if self.state == self.State.search or \
+                self.state == self.State.wait_search:
+            self.update_state(String("robot_found"))
 
     def start_callback(self, msg):
         self.start = True
@@ -219,14 +229,10 @@ class StateMachine:
         # Go explore
         self.goal_pub.publish(Goal("explore", None))
         self.set_state(self.State.exploration_initial)
-        rospy.Timer(rospy.Duration(self.initial_expl_time),
-                    self.timer_callback, oneshot=True)
+        self.set_timer(self.initial_expl_time)
         rospy.loginfo(f"{rospy.get_name()}: Initial Expl - Starting")
 
     def state_search(self):
-        if self.timer is not None:
-            self.timer.shutdown()
-        self.found_robot = False
         # Find the robot to search in a round robin fashion
         robot_to_find = None
         for _ in range(len(self.robot_list)):
@@ -239,57 +245,77 @@ class StateMachine:
                 robot_to_find = top_robot
                 break
 
-        # if we did not find a robot, go back to exploration short
-        # but be angry about it
+        # if we did not find a robot. Do not change mode (keep mode in exploration)
+        # but reset the timer so we can have another "timeout" event
         if robot_to_find is None:
-            if self.fail_count > 5:
+            if self.fail_count >= 5:
                 rospy.logfatal(f"{rospy.get_name()}: Search - " +
                                "Too many failed searches, shutting down")
                 rospy.signal_shutdown("Too many failed searches")
                 return
-            self.fail_count += 1
             rospy.logwarn(f"{rospy.get_name()}: No robot to search - Count: {self.fail_count}")
-            self.state_exploration_short()
+            self.set_timer(self.short_expl_time)
+            self.fail_count += 1
             return
 
         # We did find a robot, go search for it
+        if self.timer is not None:
+            self.timer.shutdown()
         rospy.logwarn(f"{rospy.get_name()}: Search - " +
-                      "finding robot {robot_to_find.robot_name}")
+                      f"finding robot {robot_to_find.robot_name}")
         self.set_state(self.State.search)
         robot_to_find.robot_searched = True
         goal = robot_to_find.where_to_find_me()
-        rospy.Timer(rospy.Duration(self.search_time), self.timer_callback,
-                    oneshot=True)
+        self.set_timer(self.search_time)
+        self.robot_target = robot_to_find
         self.goal_pub.publish(Goal("go to robot", goal))
 
     def state_wait_after_search(self):
-        # We are just waiting, do nothing
-        rospy.loginfo(f"{rospy.get_name()}: Search Wait - Starting")
+        # We are just waiting, do nothing. The timer was set in the previous
+        # search state
+        rospy.loginfo(f"{rospy.get_name()}: Search - Reached Waypoint. Waiting.")
         self.set_state(self.State.wait_search)
 
     def update_state(self, msg):
+        msg = msg.data
         if self.state == self.State.idle:
-            # if self.start:
-            #     self.state_exploration_initial()
-            self.state_exploration_initial()
+            if msg == "init":
+                self.state_exploration_initial()
         elif self.state == self.State.exploration_initial:
-            if msg == "timeout" or msg == "explore_end":
+            if msg == "timeout":
+                self.state_search()
+            elif msg == "explore_end":
+                self.exploration_finished = True
                 self.state_search()
         elif self.state == self.State.exploration_short:
             # Wait for the go_to_target_end to start timer
             if msg == "go_to_target_end":
-                rospy.Timer(rospy.Duration(self.short_expl_time),
-                            self.timer_callback, oneshot=True)
-            if msg == "timeout" or msg == "explore_end":
+                self.set_timer(self.short_expl_time)
+            if msg == "timeout":
+                self.state_search()
+            elif msg == "explore_end":
+                self.exploration_finished = True
                 self.state_search()
         elif self.state == self.State.search:
             if msg == "go_to_target_end":
                 self.state_wait_after_search()
-            if msg == "timeout":
-                self.state_exploration_short()
+            if msg == "robot_found" or msg == "timeout":
+                if self.timer is not None:
+                    self.timer.shutdown()
+                self.robot_target.robot_searched = False
+                if not self.exploration_finished:
+                    self.state_exploration_short()
+                else:
+                    self.state_search()
         elif self.state == self.State.wait_search:
-            if msg == "timeout":
-                self.state_exploration_short()
+            if msg == "robot_found" or msg == "timeout":
+                if self.timer is not None:
+                    self.timer.shutdown()
+                self.robot_target.robot_searched = False
+                if not self.exploration_finished:
+                    self.state_exploration_short()
+                else:
+                    self.state_search()
 
 
 if __name__ == "__main__":

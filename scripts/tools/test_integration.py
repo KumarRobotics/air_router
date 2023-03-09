@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from air_router.msg import Goal
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from std_msgs.msg import String
 import numpy as np
 import os
@@ -26,6 +26,17 @@ def create_pose_msg(coord):
     pose.pose.position.z = 60
     return pose
 
+def create_robot_pose(robot, coord):
+    if not hasattr(create_robot_pose, "count"):
+        create_robot_pose.count = 0
+    pose = PoseWithCovarianceStamped()
+    pose.header.seq = create_robot_pose.count
+    create_robot_pose.count += 1
+    pose.header.stamp = rospy.Time.now()
+    pose.pose.pose.position.x = coord[0]
+    pose.pose.pose.position.y = coord[1]
+    return pose
+
 if __name__ == "__main__":
     rospy.init_node('test_integration', anonymous=False)
     # get map_name from the params
@@ -48,38 +59,72 @@ if __name__ == "__main__":
     pose_pub = rospy.Publisher("/unity_ros/quadrotor/TrueState/pose",
                                PoseStamped, queue_size=10)
 
+    # Create a publisher for callisto and io poses
+    callisto_pose_pub = rospy.Publisher("/callisto/top_down_render/pose_est",
+                                        PoseWithCovarianceStamped, queue_size=10)
+
+    # Create a publisher for callisto and io poses
+    io_pose_pub = rospy.Publisher("/io/top_down_render/pose_est",
+                                  PoseWithCovarianceStamped, queue_size=10)
+
+    def publish_waypoint(w):
+        rospy.loginfo(f"{rospy.get_name()}: Publishing waypoint {w}")
+        pose_pub.publish(create_pose_msg(wp[w]))
+        rospy.sleep(.2)
+
     rospy.loginfo("Starting test integration")
 
     # Send initial explore command
     curr_wp_expl = min(wp.keys())
+    rospy.loginfo(f"{rospy.get_name()}: Publishing robot pose")
+    pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
     rospy.sleep(1)
-    pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
+
     for i in range(10):
-        print("Publishing waypoint %d" % curr_wp_expl)
-        pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
+        publish_waypoint(curr_wp_expl)
         curr_wp_expl += 1
-        rospy.sleep(.2)
+
+    # Test the timeout feature of search when there are no robots to search
     rospy.sleep(10)
-    pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
-    rospy.spin()
-    print("Publishing waypoint 10")
-    pose_pub.publish(create_pose_msg(wp[10]))
-    rospy.sleep(.2)
-    print("Publishing waypoint 6")
-    pose_pub.publish(create_pose_msg(wp[6]))
-    rospy.sleep(.2)
-    print("Publishing waypoint 12")
-    pose_pub.publish(create_pose_msg(wp[12]))
-    rospy.sleep(.2)
-    for i in range(20):
-        try:
-            pose_pub.publish(create_pose_msg(wp[curr_wp_expl]))
-            print("Publishing waypoint %d" % curr_wp_expl)
-        except:
-            break
+    publish_waypoint(curr_wp_expl)
+
+    # Publish a robot pose, now the search should trigger
+    rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
+    callisto_pose_pub.publish(create_robot_pose("callisto", wp[2]))
+    rospy.sleep(10)
+    publish_waypoint(6)
+    publish_waypoint(2)
+    # Timeout the search
+    rospy.sleep(10)
+    
+    # Finding the robot in a non-search state should not work
+    rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
+    callisto_pose_pub.publish(create_robot_pose("callisto", wp[5]))
+
+    # Resume exploration
+    publish_waypoint(6)
+    publish_waypoint(13)
+
+    for i in range(10):
+        publish_waypoint(curr_wp_expl)
         curr_wp_expl += 1
-        rospy.sleep(.2)
-    rospy.sleep(5)
+    rospy.sleep(10)
+
+    # Finding the robot in a search should trigger an exploration
+    rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
+    callisto_pose_pub.publish(create_robot_pose("callisto", wp[5]))
+    rospy.sleep(1)
+    publish_waypoint(4)
+    publish_waypoint(24)
+    publish_waypoint(22)
+    for i in range(8):
+        publish_waypoint(curr_wp_expl)
+        curr_wp_expl += 1
+
+    # Publish Io pose
+    io_pose_pub.publish(create_robot_pose("io", wp[10]))
+
+
 
 
 
