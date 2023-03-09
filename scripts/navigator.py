@@ -3,17 +3,21 @@ from os import wait
 import rospy
 import route_planner
 import os
+import cv2
 import yaml
 from std_msgs.msg import String
 import threading
 from air_router.msg import Goal
 from geometry_msgs.msg import PointStamped, PoseStamped, Point
-from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import NavSatFix, Image
 import pdb
 import numpy as np
 import utm
 from enum import Enum, auto
 from mavros_msgs.srv import SetMode, WaypointSetCurrent
+from cv_bridge import CvBridge
+
+bridge = CvBridge()
 
 """Navigator:
 This node is responsible for navigating the UAV along the waypoints. It
@@ -130,6 +134,10 @@ class Navigator:
         # Create subscribers _after loading services_ for the state machine
         # topics: goal and coordinates
         rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
+
+        # Create the visualization topic to debug the navigator
+        self.vis_pub = rospy.Publisher("/air_router/navigator/visualization",
+                                       Image, queue_size=10)
 
         # Counters for ROS msgs
         self.uav_goal_seq = 0
@@ -283,6 +291,19 @@ class Navigator:
                 # Send target waypoint to the UAV and check if we arrived. If we
                 # arrived, send the next waypoint
                 self.outer.send_waypoint_uav(target)
+
+                # Visualize the waypoint sent
+                img = self.outer.planner.display_points(get_image=True,
+                                                        waypoints=True,
+                                                        noFly=True)
+                quad_pos = [self.outer.uav_pose.pose.position.x,
+                            self.outer.uav_pose.pose.position.y]
+                quad_px = self.outer.planner.scale_points(quad_pos[0],
+                                                          quad_pos[1])
+                img = cv2.circle(img, tuple(quad_px), 5, (0, 0, 255), -1)
+                image_msg = bridge.cv2_to_imgmsg(img, encoding='bgr8')
+                self.outer.vis_pub.publish(image_msg)
+
                 rospy.loginfo(f"{rospy.get_name()}: Exploration - Going to waypoint %s", target)
                 while (not self.outer.arrived_at_waypoint(target) and
                        not rospy.is_shutdown() and
@@ -347,6 +368,20 @@ class Navigator:
                 # Send target waypoint to the UAV and check if we arrived. If we
                 # arrived, send the next waypoint
                 self.outer.send_waypoint_uav(target)
+
+                # Visualize the waypoint sent
+                img = self.outer.planner.display_points(get_image=True,
+                                                        routes=True,
+                                                        plan=True,
+                                                        noFly=True)
+                quad_pos = [self.outer.uav_pose.pose.position.x,
+                            self.outer.uav_pose.pose.position.y]
+                quad_px = self.outer.planner.scale_points(quad_pos[0],
+                                                          quad_pos[1])
+                img = cv2.circle(img, tuple(quad_px), 5, (0, 0, 255), -1)
+                image_msg = bridge.cv2_to_imgmsg(img, encoding='bgr8')
+                self.outer.vis_pub.publish(image_msg)
+
                 while (not self.outer.arrived_at_waypoint(target) and
                        not rospy.is_shutdown() and
                        not self.stop_event.is_set()):

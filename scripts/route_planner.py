@@ -156,7 +156,7 @@ class Path_planner():
         if len(img.shape) == 2:
             color = 255
         else:
-            color = (0, 0, 255)
+            color = (50, 50, 50)
         for item in self.mission.noFly:
             p1 = [i[0] for i in item]
             p2 = [i[1] for i in item]
@@ -169,7 +169,7 @@ class Path_planner():
             if filled:
                 cv2.fillPoly(img, [pts], color, 1)
             else:
-                cv2.polylines(img, [pts], True, color, 1)
+                cv2.polylines(img, [pts], True, color, 2)
         return img
 
     def generateGraph(self):
@@ -296,7 +296,7 @@ class Path_planner():
                 current_node = predecessors[current_node]
         return (dist, paths)
 
-    def display_points(self, origin=False, waypoints=False,
+    def display_points(self, get_image=False, origin=False, waypoints=False,
                        noFly=False, rally=False, routes=False, plan=False):
         old_x = None
         old_y = None
@@ -311,12 +311,11 @@ class Path_planner():
                 wp = self.mission.waypoints[i]
                 # print(f"Lat: {lat:.6f}, Lon: {lon:.6f}")
                 x, y = self.scale_points(wp[0], wp[1])
-                img = cv2.circle(img, (x, y), 2, (0, 0, 255), -1)
-                img = cv2.putText(img, str(i), (x, y),
-                                  cv2.FONT_HERSHEY_SIMPLEX, .25, (0, 0, 255))
-
                 if old_x is not None and old_y is not None:
                     img = cv2.line(img, (old_x, old_y), (x, y), (0, 255, 0), 1)
+                img = cv2.circle(img, (x, y), 3, (0, 255, 0), -1)
+                img = cv2.putText(img, str(i), (x, y),
+                                  cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 0, 255))
                 old_x = x
                 old_y = y
 
@@ -346,6 +345,7 @@ class Path_planner():
                     x, y = self.scale_points(lat, long)
                     x2, y2 = self.scale_points(lat2, long2)
                     cv2.line(img, (x, y), (x2, y2), (255, 255, 0), 1)
+                img = cv2.circle(img, (x, y), 3, (255, 255, 0), -1)
                 img = cv2.putText(img, str(route), (x, y),
                                   cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 0, 255))
 
@@ -378,10 +378,12 @@ class Path_planner():
                 # Plot a line connecting the end and start
                 cv2.line(img, (x, y), (last_x_end, last_y_end),
                          (0, 255, 255), 2)
-
-        cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
-        cv2.imshow('Pennovation', img)
-        cv2.waitKey(0)
+        if not get_image:
+            cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
+            cv2.imshow('Pennovation', img)
+            cv2.waitKey(0)
+        else:
+            return img
 
 
 if __name__ == "__main__":
