@@ -87,9 +87,9 @@ class Navigator:
         # Initially, the navigator is in the init mode. We will wait for an
         # order from the state machine
         # Mode gets published so other nodes can use it
-        self.mode = self.Mode.init
+        self.mode = None
         self.mode_lock = threading.Lock()
-        self.mode_pub = rospy.Publisher("/air_router/navigator/status",
+        self.mode_pub = rospy.Publisher("/air_router/navigator/state",
                                         String, queue_size=10)
 
         # List of waypoints for exploration
@@ -135,7 +135,12 @@ class Navigator:
         self.uav_goal_seq = 0
         self.uav_pose_seq = 0
 
+        rospy.loginfo(f"{rospy.get_name()}: Waiting for UAV pose")
+        while not rospy.is_shutdown() and self.uav_pose is None:
+            rospy.sleep(0.1)
+
         # We are good to go!
+        self.set_mode(self.Mode.init)
         rospy.loginfo(f"{rospy.get_name()}: Started")
 
     def set_mode(self, mode):
@@ -182,7 +187,9 @@ class Navigator:
             self.goto_target_thread.daemon = True
             self.set_mode(self.Mode.go_to_target)
             self.goto_target_thread.start()
-        elif self.mode == self.Mode.go_to_target and data.action == "explore":
+        elif self.mode == self.Mode.go_to_target or \
+                self.mode == self.Mode.go_to_target_end and \
+                data.action == "explore":
             # Signal the go to robot thread to stop
             self.stop_go_to_target.set()
             self.goto_target_thread.join()
@@ -319,8 +326,12 @@ class Navigator:
                 return
 
             # Check if we are already at the first waypoint
-            if len(route) > 0 and self.outer.arrived_at_waypoint(route[0]):
-                route = route[1:]
+            if self.outer.arrived_at_waypoint(route[0]):
+                if len(route) == 1:
+                    rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Already at the target.")
+                    return
+                else:
+                    route = route[1:]
 
             rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Route: {route}")
 
