@@ -106,16 +106,9 @@ class Robot:
         return False
 
     def where_to_find_me(self):
-        if (self.last_destination_ts is not None and
-                self.last_pose_ts is not None):
-            if self.last_destination_ts >= \
-                    self.last_pose_ts - DEFAULT_PREFER_TARGET_TIME:
-                return self.last_destination
-            else:
-                return self.last_pose
-        elif self.last_destination_ts is not None:
+        if self.last_destination_ts is not None:
             return self.last_destination
-        elif self.last_pose_ts:
+        elif self.last_pose_ts is not None:
             return self.last_pose
         return None
 
