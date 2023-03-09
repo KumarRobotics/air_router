@@ -139,6 +139,9 @@ class Navigator:
         while not rospy.is_shutdown() and self.uav_pose is None:
             rospy.sleep(0.1)
 
+        # Avoid race condition with state machine
+        rospy.sleep(1)
+
         # We are good to go!
         self.set_mode(self.Mode.init)
         rospy.loginfo(f"{rospy.get_name()}: Started")
