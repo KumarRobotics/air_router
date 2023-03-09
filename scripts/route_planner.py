@@ -95,6 +95,8 @@ class Path_planner():
         self.last_start = None
         self.last_end = None
         self.last_path = None
+        # Create a lock for the visualization objects
+        self.last_lock = threading.Lock()
 
         # Get the image from semantics_manager
         with open(map_path, 'r') as f:
@@ -224,8 +226,6 @@ class Path_planner():
 
     def planRoute(self, start_latlon, end_latlon):
         """ Returns the route for """
-        self.last_start = start_latlon
-        self.last_end = end_latlon
 
         # Check that the points are within the allowed geofence
         fence_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
@@ -265,10 +265,14 @@ class Path_planner():
                 end_node = r
 
         # If start and end node are the same, return a list with a single item
+        self.last_lock.lock()
+        self.last_start = start_latlon
+        self.last_end = end_latlon
         if start_node == end_node:
             self.last_path = [start_node]
         else:
             self.last_path = self.graph[start_node]["path"][end_node]
+        self.last_lock.unlock()
         return self.last_path
 
     def dijkstra(self, start):
@@ -338,6 +342,7 @@ class Path_planner():
             img = cv2.polylines(img, [fence], True, (0, 0, 0), 3)
 
         if routes:
+            self.last_lock.lock()
             for route in self.graph:
                 for neigh in self.graph[route]["neigh"]:
                     lat, long = self.graph[route]["latlon"]
@@ -378,6 +383,7 @@ class Path_planner():
                 # Plot a line connecting the end and start
                 cv2.line(img, (x, y), (last_x_end, last_y_end),
                          (0, 255, 255), 2)
+            self.last_lock.unlock()
         if not get_image:
             cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
             cv2.imshow('Pennovation', img)

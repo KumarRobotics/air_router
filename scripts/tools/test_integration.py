@@ -8,6 +8,7 @@ import os
 import pdb
 import rospy
 import sys
+import random
 
 count = 0
 
@@ -21,8 +22,8 @@ def create_pose_msg(coord):
     pose.header.seq = create_pose_msg.count
     create_pose_msg.count += 1
     pose.header.stamp = rospy.Time.now()
-    pose.pose.position.x = coord[0]
-    pose.pose.position.y = coord[1]
+    pose.pose.position.x = coord[0] + random.randint(0, 1)
+    pose.pose.position.y = coord[1] + random.randint(0, 1)
     pose.pose.position.z = 60
     return pose
 
@@ -33,8 +34,9 @@ def create_robot_pose(robot, coord):
     pose.header.seq = create_robot_pose.count
     create_robot_pose.count += 1
     pose.header.stamp = rospy.Time.now()
-    pose.pose.pose.position.x = coord[0] + 5
-    pose.pose.pose.position.y = coord[1] + 5
+    # Add a random offset to the robot pose between 0 and 10
+    pose.pose.pose.position.x = coord[0] + random.randint(0, 10)
+    pose.pose.pose.position.y = coord[1] + random.randint(0, 10)
     return pose
 
 if __name__ == "__main__":
@@ -97,7 +99,7 @@ if __name__ == "__main__":
     publish_waypoint(2)
     # Timeout the search
     rospy.sleep(10)
-    
+
     # Finding the robot in a non-search state should not work
     rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
     callisto_pose_pub.publish(create_robot_pose("callisto", wp[5]))
