@@ -14,10 +14,8 @@
 
   <!-- Load the test node -->
 
-  <!--
   <node pkg="air_router" type="test_integration.py" name="test_integration" output="$(arg output)">
     <param name="map_name" value="dynamic_unity_urban"/>
   </node>
-  -->
 
 </launch>

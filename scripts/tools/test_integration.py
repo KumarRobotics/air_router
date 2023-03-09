@@ -124,7 +124,7 @@ if __name__ == "__main__":
 
     # Publish Io pose
     io_pose_pub.publish(create_robot_pose("io", wp[10]))
-    rospy.sleep(10)
+    rospy.sleep(11)
     publish_waypoint(23)
     publish_waypoint(19)
     publish_waypoint(13)
