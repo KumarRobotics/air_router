@@ -97,7 +97,7 @@ class Path_planner():
         self.last_end = None
         self.last_path = None
         # Create a lock for the visualization objects
-        self.last_lock = threading.Lock()
+        self.lock = threading.Lock()
 
         # Get the image from semantics_manager
         with open(map_path, 'r') as f:
@@ -266,14 +266,14 @@ class Path_planner():
                 end_node = r
 
         # If start and end node are the same, return a list with a single item
-        with self.last_lock:
+        with self.lock:
             self.last_start = start_latlon
             self.last_end = end_latlon
             if start_node == end_node:
                 self.last_path = [start_node]
             else:
                 self.last_path = self.graph[start_node]["path"][end_node]
-        return self.last_path
+        return self.last_path.copy()
 
     def dijkstra(self, start):
         dist = {node: float('inf') for node in self.graph}
@@ -354,20 +354,19 @@ class Path_planner():
                                   cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 0, 255))
 
         if plan:
-            with self.last_lock:
-                if self.last_end is not None:
+            with self.lock:
+                if self.last_end is not None and self.last_start is not None \
+                        and self.last_path is not None:
                     last_x_end, last_y_end = self.scale_points(self.last_end[0],
                                                                self.last_end[1])
                     img = cv2.circle(img, (last_x_end, last_y_end),
                                      5, (0, 255, 255), -1)
 
-                if self.last_start is not None:
                     last_x_start, last_y_start = self.scale_points(self.last_start[0],
                                                                    self.last_start[1])
                     img = cv2.circle(img, (last_x_start, last_y_start),
                                      5, (0, 255, 255), -1)
 
-                if self.last_path is not None:
                     for i, node in enumerate(self.last_path):
                         lat, long = self.graph[node]["latlon"]
                         x, y = self.scale_points(lat, long)
