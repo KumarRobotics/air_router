@@ -96,6 +96,7 @@ class Robot:
             last_destination.point = msg.poses[-1].pose.position
         last_destination.header.frame_id = self.robot_name
         self.last_destination = last_destination
+        self.last_destination_ts = rospy.get_time()
 
         # Call the heartbeat function, as we got information from the robot
         self.heartbeat()
