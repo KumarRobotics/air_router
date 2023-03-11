@@ -98,7 +98,7 @@ class Navigator:
         # Mode gets published so other nodes can use it
         self.mode = None
         self.mode_lock = threading.Lock()
-        self.mode_pub = rospy.Publisher("/air_router/navigator/state",
+        self.mode_pub = rospy.Publisher("air_router/navigator/state",
                                         String, queue_size=10)
 
         # List of waypoints for exploration
@@ -119,29 +119,29 @@ class Navigator:
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
         if self.sim:
-            rospy.Subscriber("/unity_ros/quadrotor/TrueState/pose",
+            rospy.Subscriber("unity_ros/quadrotor/TrueState/pose",
                              PoseStamped, self.pose_callback)
         else:
-            rospy.Subscriber("/mavros/global_position/global",
+            rospy.Subscriber("mavros/global_position/global",
                              NavSatFix, self.gps_callback)
 
         # Publish the goal for the UAV. For simulation, we will just publish a
         # goal, for the real world, we will use the mavros interface
         if self.sim:
-            self.uav_goal = rospy.Publisher("/quadrotor/goal",
+            self.uav_goal = rospy.Publisher("quadrotor/goal",
                                             PointStamped, queue_size=10)
         else:
             # Service proxy for /mavros/misssion/set_current
-            rospy.wait_for_service("/mavros/mission/set_current")
-            self.set_cur_wp = rospy.ServiceProxy("/mavros/mission/set_current",
+            rospy.wait_for_service("mavros/mission/set_current")
+            self.set_cur_wp = rospy.ServiceProxy("mavros/mission/set_current",
                                                  WaypointSetCurrent)
 
         # Create subscribers _after loading services_ for the state machine
         # topics: goal and coordinates
-        rospy.Subscriber("/air_router/goal", Goal, self.goal_callback)
+        rospy.Subscriber("air_router/goal", Goal, self.goal_callback)
 
         # Create the visualization topic to debug the navigator
-        self.vis_pub = rospy.Publisher("/air_router/navigator/viz",
+        self.vis_pub = rospy.Publisher("air_router/navigator/viz",
                                        Image, queue_size=1)
 
         # Counters for ROS msgs

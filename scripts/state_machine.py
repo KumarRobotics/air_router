@@ -155,15 +155,15 @@ class StateMachine:
         # Create two topics. One for the goal of the robot
         # ("go to robot", "explore"). If we are in "go to robot"
         # the second topic will contain the coordinates of the robot
-        self.goal_pub = rospy.Publisher("/air_router/goal",
+        self.goal_pub = rospy.Publisher("air_router/goal",
                                         Goal, queue_size=1)
 
         # Subscribe to a topic that starts the state machine
-        rospy.Subscriber("/air_router/start", Empty, self.start_callback)
+        rospy.Subscriber("air_router/start", Empty, self.start_callback)
         self.start = False
 
         # Subscribe to the navigator state
-        rospy.Subscriber("/air_router/navigator/state", String,
+        rospy.Subscriber("air_router/navigator/state", String,
                          self.update_state)
 
         # Robot list is a list of comma separated robots. Generate a list
