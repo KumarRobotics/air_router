@@ -119,7 +119,7 @@ class Navigator:
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
         if self.sim:
-            rospy.Subscriber("unity_ros/quadrotor/TrueState/pose",
+            rospy.Subscriber("/unity_ros/quadrotor/TrueState/pose",
                              PoseStamped, self.pose_callback)
         else:
             rospy.Subscriber("mavros/global_position/global",
@@ -128,7 +128,7 @@ class Navigator:
         # Publish the goal for the UAV. For simulation, we will just publish a
         # goal, for the real world, we will use the mavros interface
         if self.sim:
-            self.uav_goal = rospy.Publisher("quadrotor/goal",
+            self.uav_goal = rospy.Publisher("goal",
                                             PointStamped, queue_size=10)
         else:
             # Service proxy for /mavros/misssion/set_current
