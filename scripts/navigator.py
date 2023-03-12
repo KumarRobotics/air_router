@@ -213,7 +213,10 @@ class Navigator:
             self.set_mode(self.Mode.transition)
             # Go to the last exploration position
             p = self.planner.mission.waypoints[self.explore_target_waypt[0]]
-            alt = self.planner.mission.altitude[self.explore_target_waypt[0]]
+            if self.sim:
+                alt = self.planner.mission.altitude[self.explore_target_waypt[0]]
+            else:
+                alt = 40
             self.robot_target = Point(p[0], p[1], alt)
             self.goto_target_thread = self.GoToTargetThread(self, self.stop_go_to_target)
             self.goto_target_thread.daemon = True
