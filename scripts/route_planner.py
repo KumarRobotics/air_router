@@ -112,6 +112,15 @@ class Path_planner():
 
         # Keep picture for displaying purposes
         img = cv2.imread(image)
+
+        # Resize image to a height of 1000px if its height is not 1000px
+        if img.shape[0] != 1000:
+            old_height = img.shape[0]
+            img = cv2.resize(img, (int(img.shape[1] * 1000 / img.shape[0]),
+                                   int(1000)))
+            self.scale_factor = 1000 / old_height
+        else:
+            self.scale_factor = 1
         self.img = img
 
         # Create mission object. Only QGC missions have GPS coordinates for the
@@ -144,8 +153,8 @@ class Path_planner():
         for utm_x, utm_y in zip(utms_x, utms_y):
             x_, y_ = [int(utm_x*self.resolution)+self.image_origin_px_x,
                       -int(utm_y*self.resolution)+self.image_origin_px_y]
-            x.append(x_)
-            y.append(y_)
+            x.append(int(x_*self.scale_factor))
+            y.append(int(y_*self.scale_factor))
         if len(x) == 1:
             return x[0], y[0]
         return x, y
@@ -170,8 +179,10 @@ class Path_planner():
             pts = np.array([x, y]).T
             pts = pts.reshape((-1, 1, 2))
             if filled:
+                pass
                 cv2.fillPoly(img, [pts], color, 1)
             else:
+                pass
                 cv2.polylines(img, [pts], True, color, 2)
         return img
 
@@ -195,10 +206,13 @@ class Path_planner():
         self.draw_poly_nofly(polygon_mask, filled=True)
 
         # Dilate the mask so that the lines are not too close to the fence
-        kernel_size = int(self.resolution)*5
+        kernel_size = int(self.resolution*self.scale_factor)*12
         polygon_mask = cv2.dilate(polygon_mask,
                                   np.ones((kernel_size, kernel_size), np.uint8),
                                   iterations=1)
+        # Display polygon mask
+        # cv2.imshow("mask", polygon_mask)
+        # cv2.waitKey(0)
 
         for i in points:
             for j in points[i]["neigh"].copy():
@@ -307,9 +321,9 @@ class Path_planner():
         img = self.img.copy()
         if origin:
             # Display the origin in the image
-            img = cv2.circle(img, (int(self.image_origin_px_x),
-                                   int(self.image_origin_px_y)),
-                             thickness=2, radius=10, color=(0, 0, 255))
+            img = cv2.circle(img, (int(self.image_origin_px_x*self.scale_factor),
+                                   int(self.image_origin_px_y*self.scale_factor)),
+                             thickness=2, radius=5, color=(0, 0, 255))
         if waypoints:
             for i in self.mission.waypoints:
                 wp = self.mission.waypoints[i]
