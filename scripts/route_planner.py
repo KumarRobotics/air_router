@@ -209,11 +209,11 @@ class Path_planner():
 
         # Dilate the mask so that the lines are not too close to the fence
         kernel_size = int(self.resolution*self.scale_factor)*12
-        polygon_mask = cv2.dilate(polygon_mask,
-                                  np.ones((kernel_size, kernel_size), np.uint8),
-                                  iterations=1)
+        self.polygon_mask = cv2.dilate(polygon_mask,
+                                       np.ones((kernel_size, kernel_size), np.uint8),
+                                       iterations=1)
         # Display polygon mask
-        # cv2.imshow("mask", polygon_mask)
+        # cv2.imshow("mask", self.polygon_mask)
         # cv2.waitKey(0)
 
         for i in points:
@@ -224,10 +224,17 @@ class Path_planner():
                 x2, y2 = self.scale_points(lat2, long2)
                 line_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
                 cv2.line(line_mask, (x, y), (x2, y2), 255, 1)
-                intersection = cv2.bitwise_and(line_mask, polygon_mask)
+                intersection = cv2.bitwise_and(line_mask, self.polygon_mask)
                 # Check if the line intersects with the noFly zone
                 if cv2.countNonZero(intersection) > 0:
                     del points[i]["neigh"][j]
+
+            # Check that we have at least one route to all the waypoints
+            # shutdown node otherwise
+            if len(points[i]["neigh"]) == 0:
+                rospy.logerr("No route to waypoint {}".format(i))
+                rospy.signal_shutdown("No route to waypoint {}".format(i))
+                # return
 
         # Fill the neighbor distances
         for i in points:
@@ -243,6 +250,18 @@ class Path_planner():
 
     def planRoute(self, start_latlon, end_latlon):
         """ Returns the route for """
+        # Check that the start and end are within the map boundaries
+        start_x, start_y = self.scale_points(start_latlon[0], start_latlon[1])
+        end_x, end_y = self.scale_points(end_latlon[0], end_latlon[1])
+
+        if start_x < 0 or start_x > self.img.shape[1] or \
+                start_y < 0 or start_y > self.img.shape[0]:
+            rospy.logerr("Start point outside image range")
+            return None
+        if end_x < 0 or end_x > self.img.shape[1] or \
+                end_y < 0 or end_y > self.img.shape[0]:
+            rospy.logerr("End point outside image range")
+            return None
 
         # Check that the points are within the allowed geofence
         fence_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
@@ -256,18 +275,6 @@ class Path_planner():
         # Add all the noFly zones to the fence
         fence_mask = self.draw_poly_nofly(fence_mask, filled=True)
 
-        # Check that the start and end are within the map boundaries
-        start_x, start_y = self.scale_points(start_latlon[0], start_latlon[1])
-        end_x, end_y = self.scale_points(end_latlon[0], end_latlon[1])
-
-        if start_x < 0 or start_x > self.img.shape[1] or \
-                start_y < 0 or start_y > self.img.shape[0]:
-            rospy.logerr("Start point outside image range")
-            return None
-        if end_x < 0 or end_x > self.img.shape[1] or \
-                end_y < 0 or end_y > self.img.shape[0]:
-            rospy.logerr("End point outside image range")
-            return None
 
         point_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
         point_mask = cv2.circle(point_mask, (start_x, start_y),
@@ -292,14 +299,45 @@ class Path_planner():
                 dend = d
                 end_node = r
 
-        # If start and end node are the same, return a list with a single item
         with self.lock:
             self.last_start = start_latlon
             self.last_end = end_latlon
+            # If start and end node are the same, return a list with a single
+            # item
             if start_node == end_node:
                 self.last_path = [start_node]
             else:
                 self.last_path = self.graph[start_node]["path"][end_node]
+
+            # Check if we have 3 waypoints or more in our path and see if we
+            # can skip the first one (avoids going backwards and then
+            # move forward)
+            if len(self.last_path) >= 2:
+                # Create lines for the start and first waypoint, and the first
+                # and second waypoints
+                l1_1 = np.array(start_latlon)
+                l1_2 = self.graph[self.last_path[0]]["latlon"]
+                l1 = l1_2 - l1_1
+                l2_1 = np.array(self.graph[self.last_path[0]]["latlon"])
+                l2_2 = np.array(self.graph[self.last_path[1]]["latlon"])
+                l2 = l2_1 - l2_2
+                # Get the angle between the two lines
+                angle = np.arccos(np.dot(l1, l2) / (np.linalg.norm(l1) *
+                                                    np.linalg.norm(l2)))
+                if angle < np.pi / 2:
+                    lat, long = start_latlon
+                    lat2, long2 = l2_2
+                    x, y = self.scale_points(lat, long)
+                    x2, y2 = self.scale_points(lat2, long2)
+                    line_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+                    cv2.line(line_mask, (x, y), (x2, y2), 255, 1)
+                    intersection = cv2.bitwise_and(line_mask,
+                                                   self.polygon_mask)
+                    # Check if the line intersects with the noFly zone
+                    if cv2.countNonZero(intersection) == 0:
+                        rospy.loginfo("Removing first waypoint")
+                        self.last_path.pop(0)
+
         return self.last_path.copy()
 
     def dijkstra(self, start):
