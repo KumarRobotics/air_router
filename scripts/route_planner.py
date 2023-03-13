@@ -18,6 +18,8 @@ be obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
 # FIXME(fclad): The file refers to "latlon" when using standard coordinates.
 
+MAXIMUM_EDGE_DISTANCE = 75
+
 
 class Mission():
     """ Get a mission file and convert it to standard coordinates """
@@ -198,7 +200,7 @@ class Path_planner():
         for i in points:
             for j in points[i]["neigh"].copy():
                 d = self.getDistance(points[i]["latlon"], points[j]["latlon"])
-                if d > 100:
+                if d > MAXIMUM_EDGE_DISTANCE:
                     del points[i]["neigh"][j]
 
         # Create a mask for the no-fly zone
