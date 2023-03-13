@@ -254,12 +254,23 @@ class Path_planner():
         # Add all the noFly zones to the fence
         fence_mask = self.draw_poly_nofly(fence_mask, filled=True)
 
+        # Check that the start and end are within the map boundaries
+        start_x, start_y = self.scale_points(start_latlon[0], start_latlon[1])
+        end_x, end_y = self.scale_points(end_latlon[0], end_latlon[1])
+
+        if start_x < 0 or start_x > self.img.shape[1] or \
+                start_y < 0 or start_y > self.img.shape[0]:
+            rospy.logerr("Start point outside image range")
+            return None
+        if end_x < 0 or end_x > self.img.shape[1] or \
+                end_y < 0 or end_y > self.img.shape[0]:
+            rospy.logerr("End point outside image range")
+            return None
+
         point_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
-        point_mask = cv2.circle(point_mask, self.scale_points(start_latlon[0],
-                                                               start_latlon[1]),
+        point_mask = cv2.circle(point_mask, (start_x, start_y),
                                 1, 255, -1)
-        point_mask = cv2.circle(point_mask, self.scale_points(end_latlon[0],
-                                                              end_latlon[1]),
+        point_mask = cv2.circle(point_mask, (end_x, end_y),
                                 1, 255, -1)
         if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
             rospy.logerr("Start or end point is outside the allowed geofence" +
