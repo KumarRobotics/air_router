@@ -126,7 +126,8 @@ class Robot:
     def where_to_find_me(self):
         if self.last_pose_ts is not None and \
                 (rospy.get_time() - self.last_pose_ts < self.recent_pose_time_threshold):
-            rospy.logdebug(f"{self.robot_name} going to last pose (updated recently)")
+            rospy.logdebug(f"{self.robot_name} going to last pose (updated recently "+
+                f"{rospy.get_time() - self.last_pose_ts} sec ago)")
             return self.last_pose
         elif self.last_destination_ts is not None:
             rospy.logdebug(f"{self.robot_name} going to last destination")
