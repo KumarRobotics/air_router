@@ -272,9 +272,8 @@ class Path_planner():
         fence_mask = cv2.fillPoly(fence_mask, [fence], 255, 1)
         # Invert image as we want black the points outside the fence
         fence_mask = cv2.bitwise_not(fence_mask)
-        # Add all the noFly zones to the fence
-        fence_mask = self.draw_poly_nofly(fence_mask, filled=True)
-
+        # IMPORTANT: Do no check for the no-fly zones here because the target
+        # robot may be inside one!
 
         point_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
         point_mask = cv2.circle(point_mask, (start_x, start_y),
@@ -282,8 +281,7 @@ class Path_planner():
         point_mask = cv2.circle(point_mask, (end_x, end_y),
                                 1, 255, -1)
         if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
-            rospy.logerr("Start or end point is outside the allowed geofence" +
-                         " or the no-fly zone")
+            rospy.logerr("Start or end point is outside the allowed geofence")
             return None
 
         # Find the closest waypoint to the start and end
