@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import rospy
-from std_msgs.msg import Empty, String
+from std_msgs.msg import Time, String
 from geometry_msgs.msg import PoseWithCovarianceStamped, PointStamped
 from nav_msgs.msg import Path
 import threading
@@ -47,7 +47,7 @@ class Node:
 
         # Create a subscriber for the distributed database end of transmission
         rospy.Subscriber(f"ddb/sync_complete/{self.node_name}",
-                         Empty, self.sync_complete_callback)
+                         Time, self.sync_complete_callback)
 
         self.node_searched = False
 
