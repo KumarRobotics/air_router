@@ -286,7 +286,8 @@ class StateMachine:
             self.robot_list = self.robot_list[1:] + [top_robot]
 
             # Check if the robot is alive and has a location estimation
-            if top_robot.is_alive() and top_robot.where_to_find_me():
+            where_is = top_robot.where_to_find_me()
+            if top_robot.is_alive() and where_is is not None:
                 robot_to_find = top_robot
                 break
 
@@ -310,7 +311,7 @@ class StateMachine:
                       f"finding robot {robot_to_find.node_name}")
         self.set_state(self.State.search)
         robot_to_find.set_node_search_state(True)
-        goal = robot_to_find.where_to_find_me()
+        goal = where_is
         self.set_timer(self.search_time)
         self.robot_target = robot_to_find
         self.goal_pub.publish(Goal("go to robot", goal))
