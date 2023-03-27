@@ -30,50 +30,30 @@ DEFAULT_ALIVE_TIME = 20*60
 DEFAULT_PREFER_TARGET_TIME = 2*60
 
 
-class Robot:
-    """ We create one Robot class per ground robot that we are tracking """
-    def __init__(self, robot_name, update_callback,
-                 alive_time, recent_pose_time_threshold):
+class Node:
+    """ The Node class encompases both ground robots and the basestation """
+    def __init__(self, node_name, update_callback, alive_time):
         # Check input arguments
-        assert isinstance(robot_name, str)
+        assert isinstance(node_name, str)
         assert callable(update_callback)
         assert isinstance(alive_time, int) or isinstance(alive_time, float)
-        assert isinstance(recent_pose_time_threshold, int) or \
-            isinstance(recent_pose_time_threshold, float)
 
-        self.robot_name = robot_name
-        self.last_pose = None
-        self.last_pose_ts = None
-        self.last_destination = None
-        self.last_destination_ts = None
+        self.node_name = node_name
         self.alive_time = alive_time
-        self.recent_pose_time_threshold = recent_pose_time_threshold
 
-        # We will use the last heartbeat to determine if the robot is alive,
+        # We will use the last heartbeat to determine if the node is alive,
         # and to determine if we found it (when it is updated)self.
-        #
-        # TODO(fernando): currently, the last_heartbeat is updated upon
-        # reception of any message and thus a robot heartbeat may be updated
-        # when we communicate with other robots. A fix for this is that heartbeat
-        # is updated only when we receive a message from the robot itself.
         self.last_heartbeat = None
 
-        # Create a subscriber for the robot pose
-        rospy.Subscriber(f"{self.robot_name}/top_down_render/pose_est",
-                         PoseWithCovarianceStamped, self.pose_callback)
-
-        # Create a subscriber for the robot destination
-        rospy.Subscriber(f"{self.robot_name}/spomp_global/path_viz",
-                         Path, self.destination_callback)
-
         # Create a subscriber for the distributed database end of transmission
-        rospy.Subscriber(f"ddb/sync_complete/{self.robot_name}",
+        rospy.Subscriber(f"ddb/sync_complete/{self.node_name}",
                          Empty, self.sync_complete_callback)
+
+        self.node_searched = False
 
         # Update callback is a function pointer that will be called upon an
         # update
         self.update_callback = update_callback
-        self.robot_searched = False
 
     def heartbeat(self):
         # Set current time as the last heartbeat
@@ -83,10 +63,46 @@ class Robot:
         # Call the heartbeat function, as we got information from the robot
         self.heartbeat()
         # Signal the state machine that sync completed
-        if self.robot_searched:
-            self.robot_searched = False
-            rospy.logwarn(f"{rospy.get_name()}: {self.robot_name} sync complete")
+        if self.node_searched:
+            self.node_searched = False
+            rospy.logwarn(f"{rospy.get_name()}: {self.node_name} sync complete")
             self.update_callback()
+
+    def is_alive(self):
+        if self.last_heartbeat is not None:
+            return (rospy.get_time() - self.last_heartbeat < self.alive_time)
+        return False
+
+    def where_to_find_me(self):
+        # By default, send an empty point
+        point = PointStamped()
+        return point
+
+    def set_node_search_state(self, state):
+        assert isinstance(state, bool)
+        self.node_searched = state
+
+
+class Robot(Node):
+    def __init__(self, robot_name, update_callback, alive_time,
+                 recent_pose_time_threshold):
+        super().__init__(robot_name, update_callback, alive_time)
+        assert isinstance(recent_pose_time_threshold, int) or \
+            isinstance(recent_pose_time_threshold, float)
+        self.last_pose = None
+        self.last_pose_ts = None
+        self.last_destination = None
+        self.last_destination_ts = None
+        self.recent_pose_time_threshold = recent_pose_time_threshold
+        self.robot_name = robot_name
+
+        # Create a subscriber for the robot pose
+        rospy.Subscriber(f"{self.robot_name}/top_down_render/pose_est",
+                         PoseWithCovarianceStamped, self.pose_callback)
+
+        # Create a subscriber for the robot destination
+        rospy.Subscriber(f"{self.robot_name}/spomp_global/path_viz",
+                         Path, self.destination_callback)
 
     def pose_callback(self, msg):
         # Call the heartbeat function, as we got information from the robot
@@ -118,16 +134,12 @@ class Robot:
         self.last_destination = last_destination
         self.last_destination_ts = rospy.get_time()
 
-    def is_alive(self):
-        if self.last_heartbeat is not None:
-            return (rospy.get_time() - self.last_heartbeat < self.alive_time)
-        return False
-
     def where_to_find_me(self):
         if self.last_pose_ts is not None and \
                 (rospy.get_time() - self.last_pose_ts < self.recent_pose_time_threshold):
-            rospy.logdebug(f"{self.robot_name} going to last pose (updated recently "+
-                f"{rospy.get_time() - self.last_pose_ts} sec ago)")
+            # Print time with two decimals
+            rospy.logdebug(f"{self.robot_name} going to last pose (updated " +
+                           f"{rospy.get_time() - self.last_pose_ts:.2f}s ago)")
             return self.last_pose
         elif self.last_destination_ts is not None:
             rospy.logdebug(f"{self.robot_name} going to last destination")
@@ -136,7 +148,6 @@ class Robot:
             rospy.logdebug(f"{self.robot_name} going to last pose (no destination)")
             return self.last_pose
         return None
-
 
 class StateMachine:
     class State(Enum):
@@ -174,7 +185,7 @@ class StateMachine:
 
         if not rospy.has_param("~recent_pose_time_threshold"):
             rospy.logwarn(f"{rospy.get_name()}: Default recent_pose_time_threshold")
-        self.recent_pose_time_threshold = rospy.get_param("~recent_pose_time_threshold", 120)
+        self.recent_pose_time_threshold = rospy.get_param("~recent_pose_time_threshold", 30)
         rospy.loginfo(f"{rospy.get_name()}: recent_pose_time_threshold: {self.recent_pose_time_threshold}")
 
         if not rospy.has_param("~robot_list"):
@@ -199,6 +210,12 @@ class StateMachine:
         self.robot_list = [Robot(r, self.robot_found_callback, self.alive_time,
                                  self.recent_pose_time_threshold)
                            for r in rlist]
+
+        # Add the basestation as a fake robot
+        basestation = Node("basestation",
+                           self.robot_found_callback, self.alive_time)
+        self.robot_list.insert(0, basestation)
+
         rospy.loginfo(f"{rospy.get_name()}: Robot list: {', '.join(rlist)}")
 
         # Create a state variable
@@ -290,9 +307,9 @@ class StateMachine:
         if self.timer is not None:
             self.timer.shutdown()
         rospy.logwarn(f"{rospy.get_name()}: Search - " +
-                      f"finding robot {robot_to_find.robot_name}")
+                      f"finding robot {robot_to_find.node_name}")
         self.set_state(self.State.search)
-        robot_to_find.robot_searched = True
+        robot_to_find.set_node_search_state(True)
         goal = robot_to_find.where_to_find_me()
         self.set_timer(self.search_time)
         self.robot_target = robot_to_find
@@ -330,7 +347,7 @@ class StateMachine:
             if msg == "robot_found" or msg == "timeout":
                 if self.timer is not None:
                     self.timer.shutdown()
-                self.robot_target.robot_searched = False
+                self.robot_target.set_node_search_state(False)
                 if not self.exploration_finished:
                     self.state_exploration_short()
                 else:
@@ -339,7 +356,7 @@ class StateMachine:
             if msg == "robot_found" or msg == "timeout":
                 if self.timer is not None:
                     self.timer.shutdown()
-                self.robot_target.robot_searched = False
+                self.robot_target.set_node_search_state(False)
                 if not self.exploration_finished:
                     self.state_exploration_short()
                 else:

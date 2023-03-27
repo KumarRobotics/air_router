@@ -74,6 +74,10 @@ if __name__ == "__main__":
     io_ddb_sync = rospy.Publisher("/ddb/sync_complete/io",
                                   Empty, queue_size=10)
 
+    # Create a publisher for the basestation
+    basestation_ddb_sync = rospy.Publisher("ddb/sync_complete/basestation",
+                                           Empty, queue_size=10)
+
     def publish_waypoint(w):
         rospy.loginfo(f"{rospy.get_name()}: Publishing waypoint {w}")
         pose_pub.publish(create_pose_msg(wp[w]))
@@ -97,6 +101,7 @@ if __name__ == "__main__":
     publish_waypoint(curr_wp_expl)
 
     # Publish a robot pose, now the search should trigger
+    basestation_ddb_sync.publish()
     rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
     callisto_pose_pub.publish(create_robot_pose("callisto", wp[2]))
     rospy.sleep(10)
