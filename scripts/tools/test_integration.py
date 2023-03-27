@@ -2,7 +2,7 @@
 
 from air_router.msg import Goal
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
-from std_msgs.msg import String
+from std_msgs.msg import String, Empty
 import numpy as np
 import os
 import pdb
@@ -65,9 +65,14 @@ if __name__ == "__main__":
     callisto_pose_pub = rospy.Publisher("/callisto/top_down_render/pose_est",
                                         PoseWithCovarianceStamped, queue_size=10)
 
+    callisto_ddb_sync = rospy.Publisher("/ddb/sync_complete/callisto",
+                                        Empty, queue_size=10)
+
     # Create a publisher for callisto and io poses
     io_pose_pub = rospy.Publisher("/io/top_down_render/pose_est",
                                   PoseWithCovarianceStamped, queue_size=10)
+    io_ddb_sync = rospy.Publisher("/ddb/sync_complete/io",
+                                  Empty, queue_size=10)
 
     def publish_waypoint(w):
         rospy.loginfo(f"{rospy.get_name()}: Publishing waypoint {w}")
@@ -102,7 +107,7 @@ if __name__ == "__main__":
 
     # Finding the robot in a non-search state should not work
     rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[5]))
+    callisto_ddb_sync.publish()
 
     # Resume exploration
     publish_waypoint(6)
@@ -116,6 +121,7 @@ if __name__ == "__main__":
     # Finding the robot in a search should trigger an exploration
     rospy.loginfo(f"{rospy.get_name()}: Publishing callisto pose")
     callisto_pose_pub.publish(create_robot_pose("callisto", wp[5]))
+    callisto_ddb_sync.publish()
     rospy.sleep(1)
     publish_waypoint(4)
     publish_waypoint(24)
@@ -126,6 +132,7 @@ if __name__ == "__main__":
 
     # Publish Io pose
     io_pose_pub.publish(create_robot_pose("io", wp[10]))
+    io_ddb_sync.publish()
     rospy.sleep(11)
     publish_waypoint(23)
     publish_waypoint(19)

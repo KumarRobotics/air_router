@@ -33,6 +33,11 @@ DEFAULT_PREFER_TARGET_TIME = 2*60
 class Robot:
     """ We create one Robot class per ground robot that we are tracking """
     def __init__(self, robot_name, update_callback, alive_time):
+        # Check input arguments
+        assert isinstance(robot_name, str)
+        assert callable(update_callback)
+        assert isinstance(alive_time, int) or isinstance(alive_time, float)
+
         self.robot_name = robot_name
         self.last_pose = None
         self.last_pose_ts = None
@@ -57,6 +62,10 @@ class Robot:
         rospy.Subscriber(f"{self.robot_name}/spomp_global/path_viz",
                          Path, self.destination_callback)
 
+        # Create a subscriber for the distributed database end of transmission
+        rospy.Subscriber(f"ddb/sync_complete/{self.robot_name}",
+                         Empty, self.sync_complete_callback)
+
         # Update callback is a function pointer that will be called upon an
         # update
         self.update_callback = update_callback
@@ -65,9 +74,14 @@ class Robot:
     def heartbeat(self):
         # Set current time as the last heartbeat
         self.last_heartbeat = rospy.get_time()
+
+    def sync_complete_callback(self, msg):
+        # Call the heartbeat function, as we got information from the robot
+        self.heartbeat()
+        # Signal the state machine that sync completed
         if self.robot_searched:
             self.robot_searched = False
-            rospy.logwarn(f"{rospy.get_name()}: {self.robot_name} found")
+            rospy.logwarn(f"{rospy.get_name()}: {self.robot_name} sync complete")
             self.update_callback()
 
     def pose_callback(self, msg):
@@ -81,6 +95,8 @@ class Robot:
         self.last_pose_ts = rospy.get_time()
 
     def destination_callback(self, msg):
+        # Call the heartbeat function, as we got information from the robot
+        self.heartbeat()
         # msg is a Path, we only care about the last point.
         # Store as a PointStamped
         last_destination = PointStamped()
@@ -98,8 +114,6 @@ class Robot:
         self.last_destination = last_destination
         self.last_destination_ts = rospy.get_time()
 
-        # Call the heartbeat function, as we got information from the robot
-        self.heartbeat()
 
     def is_alive(self):
         if self.last_heartbeat is not None:
@@ -159,10 +173,6 @@ class StateMachine:
         self.goal_pub = rospy.Publisher("air_router/goal",
                                         Goal, queue_size=1)
 
-        # Subscribe to a topic that starts the state machine
-        rospy.Subscriber("air_router/start", Empty, self.start_callback)
-        self.start = False
-
         # Subscribe to the navigator state
         rospy.Subscriber("air_router/navigator/state", String,
                          self.update_state)
@@ -190,7 +200,8 @@ class StateMachine:
         # Did we finish the exploration?
         self.exploration_finished = False
 
-        # We are good to go!
+        # We are good to go! The trigger from the init state will be done
+        # by the navigator node
         rospy.loginfo(f"{rospy.get_name()}: Started")
 
     def timer_callback(self, event):
@@ -211,9 +222,6 @@ class StateMachine:
         if self.state == self.State.search or \
                 self.state == self.State.wait_search:
             self.update_state(String("robot_found"))
-
-    def start_callback(self, msg):
-        self.start = True
 
     def set_state(self, state):
         self.state = state
