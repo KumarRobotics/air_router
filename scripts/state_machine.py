@@ -214,9 +214,9 @@ class StateMachine:
         # Add the basestation as a fake robot
         basestation = Node("basestation",
                            self.robot_found_callback, self.alive_time)
-        self.robot_list.insert(0, basestation)
+        self.robot_list.append(basestation)
 
-        rospy.loginfo(f"{rospy.get_name()}: Robot list: {', '.join(rlist)}")
+        rospy.loginfo(f"{rospy.get_name()}: Node list: {', '.join(rlist)}")
 
         # Create a state variable
         self.state = self.State.idle
@@ -299,7 +299,7 @@ class StateMachine:
                                "Too many failed searches, shutting down")
                 rospy.signal_shutdown("Too many failed searches")
                 return
-            rospy.logwarn(f"{rospy.get_name()}: No robot to search - Count: {self.fail_count}")
+            rospy.logwarn(f"{rospy.get_name()}: No target to search - Count: {self.fail_count}")
             self.set_timer(self.short_expl_time)
             self.fail_count += 1
             return
@@ -308,7 +308,7 @@ class StateMachine:
         if self.timer is not None:
             self.timer.shutdown()
         rospy.logwarn(f"{rospy.get_name()}: Search - " +
-                      f"finding robot {robot_to_find.node_name}")
+                      f"finding target {robot_to_find.node_name}")
         self.set_state(self.State.search)
         robot_to_find.set_node_search_state(True)
         goal = where_is
