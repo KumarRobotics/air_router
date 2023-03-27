@@ -32,11 +32,14 @@ DEFAULT_PREFER_TARGET_TIME = 2*60
 
 class Robot:
     """ We create one Robot class per ground robot that we are tracking """
-    def __init__(self, robot_name, update_callback, alive_time):
+    def __init__(self, robot_name, update_callback,
+                 alive_time, recent_pose_time_threshold):
         # Check input arguments
         assert isinstance(robot_name, str)
         assert callable(update_callback)
         assert isinstance(alive_time, int) or isinstance(alive_time, float)
+        assert isinstance(recent_pose_time_threshold, int) or \
+            isinstance(recent_pose_time_threshold, float)
 
         self.robot_name = robot_name
         self.last_pose = None
@@ -44,6 +47,7 @@ class Robot:
         self.last_destination = None
         self.last_destination_ts = None
         self.alive_time = alive_time
+        self.recent_pose_time_threshold = recent_pose_time_threshold
 
         # We will use the last heartbeat to determine if the robot is alive,
         # and to determine if we found it (when it is updated)self.
@@ -114,16 +118,21 @@ class Robot:
         self.last_destination = last_destination
         self.last_destination_ts = rospy.get_time()
 
-
     def is_alive(self):
         if self.last_heartbeat is not None:
             return (rospy.get_time() - self.last_heartbeat < self.alive_time)
         return False
 
     def where_to_find_me(self):
-        if self.last_destination_ts is not None:
+        if self.last_pose_ts is not None and \
+                (rospy.get_time() - self.last_pose_ts < self.recent_pose_time_threshold):
+            rospy.logdebug(f"{self.robot_name} going to last pose (updated recently)")
+            return self.last_pose
+        elif self.last_destination_ts is not None:
+            rospy.logdebug(f"{self.robot_name} going to last destination")
             return self.last_destination
         elif self.last_pose_ts is not None:
+            rospy.logdebug(f"{self.robot_name} going to last pose (no destination)")
             return self.last_pose
         return None
 
@@ -162,6 +171,11 @@ class StateMachine:
         self.alive_time = rospy.get_param("~alive_time", DEFAULT_ALIVE_TIME)
         rospy.loginfo(f"{rospy.get_name()}: alive_time: {self.alive_time}")
 
+        if not rospy.has_param("~recent_pose_time_threshold"):
+            rospy.logwarn(f"{rospy.get_name()}: Default recent_pose_time_threshold")
+        self.recent_pose_time_threshold = rospy.get_param("~recent_pose_time_threshold", 120)
+        rospy.loginfo(f"{rospy.get_name()}: recent_pose_time_threshold: {self.recent_pose_time_threshold}")
+
         if not rospy.has_param("~robot_list"):
             rospy.logfatal(f"{rospy.get_name()}: No robot_list parameter")
             rospy.signal_shutdown("No robot_list parameter")
@@ -181,7 +195,8 @@ class StateMachine:
         rlist = rospy.get_param("~robot_list").split(",")
         rlist = [r.strip() for r in rlist]
         assert len(rlist) > 0
-        self.robot_list = [Robot(r, self.robot_found_callback, self.alive_time)
+        self.robot_list = [Robot(r, self.robot_found_callback, self.alive_time,
+                                 self.recent_pose_time_threshold)
                            for r in rlist]
         rospy.loginfo(f"{rospy.get_name()}: Robot list: {', '.join(rlist)}")
 
