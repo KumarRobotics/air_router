@@ -46,7 +46,8 @@ class Node:
         self.last_heartbeat = None
 
         # Create a subscriber for the distributed database end of transmission
-        rospy.Subscriber(f"ddb/sync_complete/{self.node_name}",
+        # _when the quad finishes the transmission_ to the clients (server side)
+        rospy.Subscriber(f"ddb/server_sync_complete/{self.node_name}",
                          Time, self.sync_complete_callback)
 
         self.node_searched = False
@@ -296,8 +297,7 @@ class StateMachine:
         if robot_to_find is None:
             if self.fail_count >= 5:
                 rospy.logfatal(f"{rospy.get_name()}: Search - " +
-                               "Too many failed searches, shutting down")
-                rospy.signal_shutdown("Too many failed searches")
+                               "Too many failed searches.")
                 return
             rospy.logwarn(f"{rospy.get_name()}: No target to search - Count: {self.fail_count}")
             self.set_timer(self.short_expl_time)
