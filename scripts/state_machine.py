@@ -77,6 +77,7 @@ class Node:
     def where_to_find_me(self):
         # By default, send an empty point
         point = PointStamped()
+        point.header.frame_id = self.node_name
         return point
 
     def set_node_search_state(self, state):
