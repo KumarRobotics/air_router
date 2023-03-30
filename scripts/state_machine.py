@@ -312,13 +312,12 @@ class StateMachine:
         self.set_state(self.State.search)
         robot_to_find.set_node_search_state(True)
         goal = where_is
-        self.set_timer(self.search_time)
         self.robot_target = robot_to_find
         self.goal_pub.publish(Goal("go to robot", goal))
 
     def state_wait_after_search(self):
-        # We are just waiting, do nothing. The timer was set in the previous
-        # search state
+        # We are just waiting, set a timer and do nothing. 
+        self.set_timer(self.search_time)
         rospy.loginfo(f"{rospy.get_name()}: Search - Reached Waypoint. Waiting.")
         self.set_state(self.State.wait_search)
 
@@ -345,9 +344,7 @@ class StateMachine:
         elif self.state == self.State.search:
             if msg == "go_to_target_end":
                 self.state_wait_after_search()
-            if msg == "robot_found" or msg == "timeout":
-                if self.timer is not None:
-                    self.timer.shutdown()
+            if msg == "robot_found":
                 self.robot_target.set_node_search_state(False)
                 if not self.exploration_finished:
                     self.state_exploration_short()
