@@ -4,9 +4,12 @@
 
   <arg name="initial_expl_time" default="300"/>
   <arg name="short_expl_time" default="120"/>
-  <arg name="search_time" default="120"/>
+  <arg name="after_search_time" default="15"/>
+  <arg name="tracking_time" default="60"/>
+
   <arg name="recent_pose_time_threshold" default="120"/>
   <arg name="acceptance_radius" default="2"/>
+
   <arg name="sim" default="true"/>
   <arg name="robot_list" default="io,callisto,europa"/>
   <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
@@ -20,7 +23,7 @@
   <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
     <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
     <param name="short_exploration_time" value="$(arg short_expl_time)"/>
-    <param name="search_time" value="$(arg search_time)"/>
+    <param name="after_search_time" value="$(arg after_search_time)"/>
     <param name="recent_pose_time_threshold" value="$(arg recent_pose_time_threshold)"/>
     <param name="robot_list" value="$(arg robot_list)"/>
   </node>

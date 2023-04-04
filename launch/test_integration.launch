@@ -3,18 +3,34 @@
 
   <arg name="output" default="screen"/>
 
-  <!-- Load the default titan file -->
-  <include file="$(find air_router)/launch/titan.launch" pass_all_args="True">
-    <arg name="initial_expl_time" default="10"/>
-    <arg name="short_expl_time" default="10"/>
-    <arg name="search_time" default="10"/>
-    <arg name="acceptance_radius" default="2"/>
-    <arg name="sim" default="true"/>
-  </include>
+  <arg name="initial_expl_time" default="5"/>
+  <arg name="short_expl_time" default="5"/>
+  <arg name="after_search_time" default="5"/>
+  <arg name="recent_pose_time_threshold" default="5"/>
+  <arg name="tracking_time" default="10"/>
+  <arg name="acceptance_radius" default="2"/>
+  <arg name="sim" default="true"/>
+  <arg name="robot_list" default="io,callisto,europa"/>
+  <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
+
+  <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">
+    <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
+    <param name="sim" value="$(arg sim)"/>
+    <param name="world_config_path" value="$(arg world_config_path)"/>
+  </node>
+
+  <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
+    <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
+    <param name="short_exploration_time" value="$(arg short_expl_time)"/>
+    <param name="after_search_time" value="$(arg after_search_time)"/>
+    <param name="tracking_time" value="$(arg tracking_time)"/>
+    <param name="recent_pose_time_threshold" value="$(arg recent_pose_time_threshold)"/>
+    <param name="robot_list" value="$(arg robot_list)"/>
+  </node>
 
   <!-- Load the test node -->
-
-  <node pkg="air_router" type="test_integration.py" name="test_integration" output="$(arg output)">
+  <node pkg="air_router" type="test_integration.py" name="test_integration"
+    required="true" output="$(arg output)">
     <param name="map_name" value="dynamic_unity_urban"/>
   </node>
 
