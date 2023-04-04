@@ -90,6 +90,8 @@ if __name__ == "__main__":
 
     def publish_waypoint(w):
         print_test_message(f"Publishing pose {w}")
+        if rospy.is_shutdown():
+            sys.exit(0)
         pose_pub.publish(create_pose_msg(wp[w]))
         rospy.sleep(.2)
 
@@ -203,13 +205,26 @@ if __name__ == "__main__":
     publish_waypoint(20)
     print_test_message("Timeout")
     rospy.sleep(11)
-
+    print_test_message("Find basestation right away")
+    basestation_ddb_sync.publish()
+    rospy.sleep(1)
+    print_test_message("Finding io")
+    publish_waypoint(17)
+    publish_waypoint(7)
+    publish_waypoint(10)
+    print_test_message("Change io pose")
+    io_pose_pub.publish(create_robot_pose("io", wp[20]))
+    rospy.sleep(1)
+    print_test_message("Chase the new position")
+    publish_waypoint(7)
+    for i in range(2, 13):
+        print_test_message("Change io pose")
+        io_pose_pub.publish(create_robot_pose("io", wp[i]))
+        rospy.sleep(1)
+    print_test_message("Find io. Should do nothing as we already timed out.")
+    io_ddb_sync.publish()
+    rospy.sleep(1)
+    print_test_message("Find callisto")
+    callisto_ddb_sync.publish()
     # Finished all tests
     rospy.spin()
-
-
-
-
-
-
-

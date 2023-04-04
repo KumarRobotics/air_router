@@ -291,7 +291,8 @@ class StateMachine:
 
     def pose_updated_callback(self):
         if self.state == self.State.search or \
-                self.state == self.State.wait_search:
+                self.state == self.State.wait_search or \
+                self.state == self.State.tracking:
             self.update_state(String("pose_updated"))
 
     def set_state(self, state):
