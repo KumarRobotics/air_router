@@ -57,22 +57,23 @@ class Node:
         # update
         self.update_callback = update_callback
 
-    def heartbeat(self):
+    def heartbeat(self, time):
         # Set current time as the last heartbeat
-        self.last_heartbeat = rospy.get_time()
+        self.last_heartbeat = time
 
     def sync_complete_callback(self, msg):
-        # Call the heartbeat function, as we got information from the robot
-        self.heartbeat()
         # Signal the state machine that sync completed
         if self.node_searched:
             rospy.logwarn(f"{rospy.get_name()}: {self.node_name} " +
                           "sync complete")
             self.update_callback()
+        # Call the heartbeat function, as we just updated with the robot
+        self.heartbeat(rospy.get_rostime())
 
     def is_alive(self):
         if self.last_heartbeat is not None:
-            return (rospy.get_time() - self.last_heartbeat < self.alive_time)
+            delta = rospy.get_rostime() - self.last_heartbeat
+            return (delta.to_sec() < self.alive_time)
         return False
 
     def where_to_find_me(self):
@@ -83,8 +84,8 @@ class Node:
 
     def set_node_search_state(self, state):
         assert isinstance(state, bool)
-        rospy.logwarn(f"{rospy.get_name()}: {self.node_name} " +
-                      f"search state set to {state}")
+        rospy.logdebug(f"{rospy.get_name()}: {self.node_name} " +
+                       f"search state set to {state}")
         self.node_searched = state
 
 
@@ -95,9 +96,7 @@ class Robot(Node):
         assert isinstance(recent_pose_time_threshold, int) or \
             isinstance(recent_pose_time_threshold, float)
         self.last_pose = None
-        self.last_pose_ts = None
         self.last_destination = None
-        self.last_destination_ts = None
         self.recent_pose_time_threshold = recent_pose_time_threshold
         self.robot_name = robot_name
 
@@ -113,20 +112,21 @@ class Robot(Node):
         self.pose_updated_callback = pose_updated_callback
 
     def pose_callback(self, msg):
-        # Call the heartbeat function, as we got information from the robot
-        self.heartbeat()
         # Set the current pose as a PointStamped
-        self.last_pose = PointStamped()
-        self.last_pose.header = msg.header
-        self.last_pose.point = msg.pose.pose.position
-        self.last_pose.header.frame_id = self.robot_name
-        self.last_pose_ts = rospy.get_time()
-        if self.node_searched:
+        pose = PointStamped()
+        pose.header = msg.header
+        pose.point = msg.pose.pose.position
+        pose.header.frame_id = self.robot_name
+        # Double check that the pose we are getting is newer than the pose we
+        # currently have
+        if self.node_searched and self.last_pose is not None \
+                and pose.header.stamp > self.last_pose.header.stamp:
             self.pose_updated_callback()
+        self.last_pose = pose
+        # Call the heartbeat function, as we got information from the robot
+        self.heartbeat(msg.header.stamp)
 
     def destination_callback(self, msg):
-        # Call the heartbeat function, as we got information from the robot
-        self.heartbeat()
         # msg is a Path, we only care about the last point.
         # Store as a PointStamped
         last_destination = PointStamped()
@@ -142,19 +142,22 @@ class Robot(Node):
             last_destination.point = msg.poses[-1].pose.position
         last_destination.header.frame_id = self.robot_name
         self.last_destination = last_destination
-        self.last_destination_ts = rospy.get_time()
+        # Call the heartbeat function, as we got information from the robot
+        self.heartbeat(msg.header.stamp)
 
     def where_to_find_me(self):
-        if self.last_pose_ts is not None and \
-                (rospy.get_time() - self.last_pose_ts < self.recent_pose_time_threshold):
+        duration = rospy.get_rostime() - self.last_pose.header.stamp  \
+                if self.last_pose is not None else None
+        if duration is not None and \
+                duration.to_sec() < self.recent_pose_time_threshold:
             # Print time with two decimals
-            rospy.logdebug(f"{self.robot_name} going to last pose (updated " +
-                           f"{rospy.get_time() - self.last_pose_ts:.2f}s ago)")
+            rospy.logdebug(f"{self.robot_name} going to last pose " +
+                           f"(updated {duration.to_sec():.2f}s ago)")
             return self.last_pose
-        elif self.last_destination_ts is not None:
+        elif self.last_destination is not None:
             rospy.logdebug(f"{self.robot_name} going to last destination")
             return self.last_destination
-        elif self.last_pose_ts is not None:
+        elif self.last_pose is not None:
             rospy.logdebug(f"{self.robot_name} going to last pose" +
                            "(no destination)")
             return self.last_pose
@@ -308,9 +311,17 @@ class StateMachine:
 
             # Check if the robot is alive and has a location estimation
             where_is = top_robot.where_to_find_me()
-            if top_robot.is_alive() and where_is is not None:
-                robot_to_find = top_robot
-                break
+            alive = top_robot.is_alive()
+            if not alive:
+                rospy.logerr(f"{rospy.get_name()}: Robot {top_robot.node_name} " +
+                              "is dead")
+            else:
+                if where_is is None:
+                    rospy.logerr(f"{rospy.get_name()}: Robot {top_robot.node_name} " +
+                                 f"has no location estimation")
+                else:
+                    robot_to_find = top_robot
+                    break
 
         # Check if we found a robot
         if robot_to_find is None:

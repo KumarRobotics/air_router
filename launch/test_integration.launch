@@ -10,7 +10,7 @@
   <arg name="tracking_time" default="10"/>
   <arg name="acceptance_radius" default="2"/>
   <arg name="sim" default="true"/>
-  <arg name="robot_list" default="io,callisto,europa"/>
+  <arg name="robot_list" default="io,callisto"/>
   <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
 
   <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">

@@ -36,16 +36,16 @@ def create_pose_msg(coord):
     return pose
 
 
-def create_robot_pose(robot, coord):
+def create_robot_pose(coord):
     if not hasattr(create_robot_pose, "count"):
         create_robot_pose.count = 0
     pose = PoseWithCovarianceStamped()
     pose.header.seq = create_robot_pose.count
     create_robot_pose.count += 1
     pose.header.stamp = rospy.Time.now()
-    # Add a random offset to the robot pose between 0 and 10
-    pose.pose.pose.position.x = coord[0] + random.randint(0, 10)
-    pose.pose.pose.position.y = coord[1] + random.randint(0, 10)
+    # Add a random offset to the robot pose between 0 and 1
+    pose.pose.pose.position.x = coord[0] + random.randint(0, 1)
+    pose.pose.pose.position.y = coord[1] + random.randint(0, 1)
     return pose
 
 if __name__ == "__main__":
@@ -89,7 +89,7 @@ if __name__ == "__main__":
                                            Time, queue_size=10)
 
     def publish_waypoint(w):
-        print_test_message(f"Publishing pose {w}")
+        print_test_message(f"Publishing Titan pose {w}")
         if rospy.is_shutdown():
             sys.exit(0)
         pose_pub.publish(create_pose_msg(wp[w]))
@@ -111,7 +111,8 @@ if __name__ == "__main__":
         curr_wp_expl += 1
 
     # Test the timeout feature of search when there are no robots to search
-    print_test_message(f"Should go to search and go back as there are no targets")
+    print_test_message("Should go to search and " +
+                       "then go back as there are no targets.")
     rospy.sleep(6)
 
     # Publish some more robot waypoint
@@ -122,28 +123,28 @@ if __name__ == "__main__":
         curr_wp_expl += 1
 
     # This should do nothing
-    print_test_message(f"Publishing sync message, should do nothing")
+    print_test_message("Publishing basestation sync message. " +
+                       "should do nothing.")
     basestation_ddb_sync.publish()
 
     # Publish a robot pose
-    print_test_message(f"Publishing callisto pose")
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[2]))
-    print_test_message(f"Time out into search mode")
+    print_test_message("Publishing callisto pose")
+    callisto_pose_pub.publish(create_robot_pose(wp[2]))
+    print_test_message("Time out into search mode")
     rospy.sleep(3)
-    print_test_message(f"Going to callisto pose")
+    print_test_message("Going to callisto pose")
     publish_waypoint(4)
     publish_waypoint(2)
     # Timeout the search
-    print_test_message(f"Do not publish callisto pose and time out")
+    print_test_message("Do not publish callisto sync complete and time out")
     rospy.sleep(5)
     # Finding the robot in a non-search state should not work
-    print_test_message(f"Publishing sync message, should do nothing")
+    print_test_message(f"Publishing sync complete, should do nothing")
     callisto_ddb_sync.publish()
 
     # Resume exploration
     publish_waypoint(6)
     publish_waypoint(7)
-    publish_waypoint(5)
 
     for i in range(3):
         publish_waypoint(curr_wp_expl)
@@ -157,16 +158,16 @@ if __name__ == "__main__":
     rospy.sleep(1)
     print_test_message(f"Publishing callisto pose. Nothing should " +
                        "happen as we are searching the basestation")
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[5]))
+    callisto_pose_pub.publish(create_robot_pose(wp[5]))
     rospy.sleep(1)
     publish_waypoint(6)
     publish_waypoint(2)
-    print_test_message("Find the basestation")
+    print_test_message("Publish basestation sync complete")
     basestation_ddb_sync.publish()
     rospy.sleep(1)
     print_test_message("Going back to exploration. Publish Io pose.")
     publish_waypoint(6)
-    io_pose_pub.publish(create_robot_pose("io", wp[10]))
+    io_pose_pub.publish(create_robot_pose(wp[10]))
     publish_waypoint(7)
     publish_waypoint(14)
     publish_waypoint(13)
@@ -189,42 +190,42 @@ if __name__ == "__main__":
         publish_waypoint(curr_wp_expl)
         curr_wp_expl += 1
     # Search for callisto, chasing it
-    print_test_message("Chase callisto")
+    print_test_message("Chase callisto, first target after exploration")
     publish_waypoint(27)
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[20]))
-    rospy.sleep(.1)
+    callisto_pose_pub.publish(create_robot_pose(wp[20]))
+    rospy.sleep(.3)
+    publish_waypoint(3)
+    callisto_pose_pub.publish(create_robot_pose(wp[20]))
+    rospy.sleep(.3)
+    publish_waypoint(27)
+    callisto_pose_pub.publish(create_robot_pose(wp[20]))
+    rospy.sleep(.3)
     publish_waypoint(25)
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[20]))
-    rospy.sleep(.1)
+    callisto_pose_pub.publish(create_robot_pose(wp[20]))
+    rospy.sleep(.3)
     publish_waypoint(24)
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[20]))
-    rospy.sleep(.1)
-    publish_waypoint(21)
-    callisto_pose_pub.publish(create_robot_pose("callisto", wp[20]))
-    rospy.sleep(.1)
-    publish_waypoint(20)
     print_test_message("Timeout")
     rospy.sleep(11)
-    print_test_message("Find basestation right away")
+    print_test_message("Find basestation right away. Publish sync complete.")
     basestation_ddb_sync.publish()
     rospy.sleep(1)
-    print_test_message("Finding io")
+    print_test_message("Searching for io")
+    publish_waypoint(21)
+    publish_waypoint(20)
     publish_waypoint(17)
-    publish_waypoint(7)
-    publish_waypoint(10)
     print_test_message("Change io pose")
-    io_pose_pub.publish(create_robot_pose("io", wp[20]))
+    io_pose_pub.publish(create_robot_pose(wp[20]))
     rospy.sleep(1)
-    print_test_message("Chase the new position")
+    print_test_message("Go to the new io position")
     publish_waypoint(7)
     for i in range(2, 13):
         print_test_message("Change io pose")
-        io_pose_pub.publish(create_robot_pose("io", wp[i]))
+        io_pose_pub.publish(create_robot_pose(wp[i]))
         rospy.sleep(1)
-    print_test_message("Find io. Should do nothing as we already timed out.")
+    print_test_message("Sync complete io. Should do nothing as we already timed out.")
     io_ddb_sync.publish()
     rospy.sleep(1)
-    print_test_message("Find callisto")
+    print_test_message("Sync complete callisto")
     callisto_ddb_sync.publish()
     # Finished all tests
     rospy.spin()
