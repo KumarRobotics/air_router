@@ -8,7 +8,7 @@
   <arg name="tracking_time" default="60"/>
 
   <arg name="recent_pose_time_threshold" default="120"/>
-  <arg name="acceptance_radius" default="2"/>
+  <arg name="acceptance_radius" default="4"/>
 
   <arg name="sim" default="true"/>
   <arg name="robot_list" default="io,callisto,europa"/>

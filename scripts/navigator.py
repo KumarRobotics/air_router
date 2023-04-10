@@ -23,7 +23,7 @@ creates a plan for performing the action using the router.
 """
 
 # Default acceptance radius for the UAV in meters
-DEFAULT_ACCEPTANCE_RADIUS = 2
+DEFAULT_ACCEPTANCE_RADIUS = 3
 
 def cv_to_ros(img):
     image_msg = Image()
