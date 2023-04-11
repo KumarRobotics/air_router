@@ -171,6 +171,7 @@ class Path_planner():
             color = 255
         else:
             color = (50, 50, 50)
+        # Draw all the no fly zones
         for item in self.mission.noFly:
             p1 = [i[0] for i in item]
             p2 = [i[1] for i in item]
@@ -184,8 +185,19 @@ class Path_planner():
                 pass
                 cv2.fillPoly(img, [pts], color, 1)
             else:
-                pass
                 cv2.polylines(img, [pts], True, color, 2)
+        # Draw the fence
+        fence = np.array(self.mission.fence["polygon"])
+        fence_x, fence_y = self.scale_points(fence[:, 0], fence[:, 1])
+        fence = np.array([fence_x, fence_y]).T
+        fence = fence.reshape((-1, 1, 2))
+        if filled:
+            # We want the negative of the fence here
+            mask = np.full(img.shape[:2], 255, dtype=np.uint8)
+            cv2.fillPoly(mask, [fence], 0, 1)
+            cv2.add(img, mask, img)
+        else:
+            img = cv2.polylines(img, [fence], True, color, 2)
         return img
 
     def generateGraph(self):
@@ -193,8 +205,8 @@ class Path_planner():
         points = {}
         for i in self.mission.waypoints:
             points[i] = {"latlon": self.mission.waypoints[i],
-                         "neigh": {j: None for j in self.mission.waypoints.keys() if
-                                                    j != i}}
+                         "neigh": {j: None for j
+                                   in self.mission.waypoints.keys() if j != i}}
 
         # Remove points that are too far away from each other
         for i in points:
@@ -205,12 +217,13 @@ class Path_planner():
 
         # Create a mask for the no-fly zone
         polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
-        self.draw_poly_nofly(polygon_mask, filled=True)
+        polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
 
         # Dilate the mask so that the lines are not too close to the fence
         kernel_size = int(self.resolution*self.scale_factor)*12
         self.polygon_mask = cv2.dilate(polygon_mask,
-                                       np.ones((kernel_size, kernel_size), np.uint8),
+                                       np.ones((kernel_size, kernel_size),
+                                               np.uint8),
                                        iterations=1)
         # Display polygon mask
         # cv2.imshow("mask", self.polygon_mask)
@@ -397,12 +410,6 @@ class Path_planner():
 
         if noFly:
             img = self.draw_poly_nofly(img, filled=False)
-            fence = np.array(self.mission.fence["polygon"])
-            fence_x, fence_y = self.scale_points(fence[:, 0], fence[:, 1])
-            fence = np.array([fence_x, fence_y]).T
-            fence = fence.reshape((-1, 1, 2))
-            # Draw polygon for the fence
-            img = cv2.polylines(img, [fence], True, (0, 0, 0), 3)
 
         if routes:
             for route in self.graph:
@@ -476,8 +483,8 @@ if __name__ == "__main__":
     for j in range(100):
         start_latlon = [random.uniform(-130, 130),
                         random.uniform(-100, 100)]
-        end_latlon =   [random.uniform(-130, 130),
-                        random.uniform(-100, 100)]
+        end_latlon = [random.uniform(-130, 130),
+                      random.uniform(-100, 100)]
         print(f"Start: {start_latlon} - End: {end_latlon}")
         route = q.planRoute(start_latlon, end_latlon)
         if route is not None:
