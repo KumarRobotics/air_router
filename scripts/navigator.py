@@ -109,6 +109,10 @@ class Navigator:
         # UAV pose keeps the pose of the UAV in standard coordinates:
         self.uav_pose = None
 
+        # Counters for ROS msgs
+        self.uav_goal_seq = 0
+        self.uav_pose_seq = 0
+
         # Target goal for the UAV in GoToTarget mode
         self.robot_target = None
 
@@ -143,10 +147,6 @@ class Navigator:
         # Create the visualization topic to debug the navigator
         self.vis_pub = rospy.Publisher("air_router/navigator/viz",
                                        Image, queue_size=1)
-
-        # Counters for ROS msgs
-        self.uav_goal_seq = 0
-        self.uav_pose_seq = 0
 
         rospy.loginfo(f"{rospy.get_name()}: Waiting for UAV pose")
         while not rospy.is_shutdown() and self.uav_pose is None:
