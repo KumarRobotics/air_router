@@ -80,6 +80,8 @@ class Node:
         # By default, send an empty point
         point = PointStamped()
         point.header.frame_id = self.node_name
+        point.point.x = 60.0
+        point.point.y = 42.0
         return point
 
     def set_node_search_state(self, state):
