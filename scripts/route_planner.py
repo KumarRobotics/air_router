@@ -18,7 +18,7 @@ be obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
 # FIXME(fclad): The file refers to "latlon" when using standard coordinates.
 
-MAXIMUM_EDGE_DISTANCE = 75
+MAXIMUM_EDGE_DISTANCE = 150
 
 
 class Mission():
