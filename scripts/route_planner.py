@@ -18,7 +18,7 @@ be obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
 # FIXME(fclad): The file refers to "latlon" when using standard coordinates.
 
-MAXIMUM_EDGE_DISTANCE = 150
+MAXIMUM_EDGE_DISTANCE = 100
 
 
 class Mission():
@@ -116,14 +116,37 @@ class Path_planner():
         img = cv2.imread(image)
 
         # Resize image to a height of 1000px if its height is not 1000px
-        if img.shape[0] != 1000:
-            old_height = img.shape[0]
-            img = cv2.resize(img, (int(img.shape[1] * 1000 / img.shape[0]),
-                                   int(1000)))
-            self.scale_factor = 1000 / old_height
-        else:
-            self.scale_factor = 1
+        # if img.shape[0] != 1000:
+        #     old_height = img.shape[0]
+        #     img = cv2.resize(img, (int(img.shape[1] * 1000 / img.shape[0]),
+        #                            int(1000)))
+        #     self.scale_factor = 1000 / old_height
+        # else:
+        #     self.scale_factor = 1
+        self.scale_factor = 1
         self.img = img
+
+        # # Reduce the contrast of the image
+        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # cl1 = clahe.apply(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        # # make the image brighter
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+        # self.img = cv2.convertScaleAbs(self.img, alpha=2.5, beta=0)
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+
+        # Desaturate the image
+        self.img = cv2.cvtColor(self.img, cv2.COLOR_BGR2HSV)
+        self.img[:, :, 1] = self.img[:, :, 1] * 0.4
+        self.img[:, :, 2] = self.img[:, :, 2] * .5
+        self.img = cv2.cvtColor(self.img, cv2.COLOR_HSV2BGR)
+        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # cl1 = clahe.apply(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        # # make the image brighter
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+        # self.img = cv2.convertScaleAbs(self.img, alpha=2.5, beta=0)
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+
+
 
         # Create mission object. Only QGC missions have GPS coordinates for the
         # origin
@@ -170,7 +193,7 @@ class Path_planner():
         if len(img.shape) == 2:
             color = 255
         else:
-            color = (50, 50, 50)
+            color = (00, 50, 200)
         # Draw all the no fly zones
         for item in self.mission.noFly:
             p1 = [i[0] for i in item]
@@ -182,10 +205,9 @@ class Path_planner():
             pts = np.array([x, y]).T
             pts = pts.reshape((-1, 1, 2))
             if filled:
-                pass
                 cv2.fillPoly(img, [pts], color, 1)
             else:
-                cv2.polylines(img, [pts], True, color, 2)
+                cv2.polylines(img, [pts], True, color, 3)
         # Draw the fence
         fence = np.array(self.mission.fence["polygon"])
         fence_x, fence_y = self.scale_points(fence[:, 0], fence[:, 1])
@@ -197,7 +219,7 @@ class Path_planner():
             cv2.fillPoly(mask, [fence], 0, 1)
             cv2.add(img, mask, img)
         else:
-            img = cv2.polylines(img, [fence], True, color, 2)
+            img = cv2.polylines(img, [fence], True, color, 4)
         return img
 
     def generateGraph(self):
@@ -220,7 +242,7 @@ class Path_planner():
         polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
 
         # Dilate the mask so that the lines are not too close to the fence
-        kernel_size = int(self.resolution*self.scale_factor)*12
+        kernel_size = int(self.resolution*self.scale_factor)*5
         self.polygon_mask = cv2.dilate(polygon_mask,
                                        np.ones((kernel_size, kernel_size),
                                                np.uint8),
@@ -236,7 +258,7 @@ class Path_planner():
                 x, y = self.scale_points(lat, long)
                 x2, y2 = self.scale_points(lat2, long2)
                 line_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
-                cv2.line(line_mask, (x, y), (x2, y2), 255, 1)
+                cv2.line(line_mask, (x, y), (x2, y2), 255, 3)
                 intersection = cv2.bitwise_and(line_mask, self.polygon_mask)
                 # Check if the line intersects with the noFly zone
                 if cv2.countNonZero(intersection) > 0:
@@ -290,9 +312,9 @@ class Path_planner():
 
         point_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
         point_mask = cv2.circle(point_mask, (start_x, start_y),
-                                1, 255, -1)
+                                10, 255, 2)
         point_mask = cv2.circle(point_mask, (end_x, end_y),
-                                1, 255, -1)
+                                10, 255, 2)
         if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
             rospy.logerr("Start or end point is outside the allowed geofence")
             return None
@@ -341,7 +363,7 @@ class Path_planner():
                     x, y = self.scale_points(lat, long)
                     x2, y2 = self.scale_points(lat2, long2)
                     line_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
-                    cv2.line(line_mask, (x, y), (x2, y2), 255, 1)
+                    cv2.line(line_mask, (x, y), (x2, y2), 255, 5)
                     intersection = cv2.bitwise_and(line_mask,
                                                    self.polygon_mask)
                     # Check if the line intersects with the noFly zone
@@ -385,17 +407,17 @@ class Path_planner():
             # Display the origin in the image
             img = cv2.circle(img, (int(self.image_origin_px_x*self.scale_factor),
                                    int(self.image_origin_px_y*self.scale_factor)),
-                             thickness=2, radius=5, color=(0, 0, 255))
+                             thickness=2, radius=10, color=(0, 0, 255))
         if waypoints:
             for i in self.mission.waypoints:
                 wp = self.mission.waypoints[i]
                 # print(f"Lat: {lat:.6f}, Lon: {lon:.6f}")
                 x, y = self.scale_points(wp[0], wp[1])
                 if old_x is not None and old_y is not None:
-                    img = cv2.line(img, (old_x, old_y), (x, y), (0, 255, 0), 1)
-                img = cv2.circle(img, (x, y), 3, (0, 255, 0), -1)
+                    img = cv2.line(img, (old_x, old_y), (x, y), (0, 255, 0), 2)
+                img = cv2.circle(img, (x, y), 10, (0, 255, 0), -1)
                 img = cv2.putText(img, str(i), (x, y),
-                                  cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 0, 255))
+                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 old_x = x
                 old_y = y
 
@@ -418,10 +440,16 @@ class Path_planner():
                     lat2, long2 = self.graph[neigh]["latlon"]
                     x, y = self.scale_points(lat, long)
                     x2, y2 = self.scale_points(lat2, long2)
-                    cv2.line(img, (x, y), (x2, y2), (255, 255, 0), 1)
-                img = cv2.circle(img, (x, y), 3, (255, 255, 0), -1)
+                    cv2.line(img, (x, y), (x2, y2), (255, 255, 0), 2)
+
+            for route in self.graph:
+                for neigh in self.graph[route]["neigh"]:
+                    lat, long = self.graph[route]["latlon"]
+                    lat2, long2 = self.graph[neigh]["latlon"]
+                    x, y = self.scale_points(lat, long)
+                img = cv2.circle(img, (x, y), 10, (255, 100, 0), -1)
                 img = cv2.putText(img, str(route), (x, y),
-                                  cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 0, 255))
+                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         if plan:
             with self.lock:
@@ -430,28 +458,35 @@ class Path_planner():
                     last_x_end, last_y_end = self.scale_points(self.last_end[0],
                                                                self.last_end[1])
                     img = cv2.circle(img, (last_x_end, last_y_end),
-                                     5, (0, 255, 255), -1)
+                                     10, (0, 255, 255), -1)
 
                     last_x_start, last_y_start = self.scale_points(self.last_start[0],
                                                                    self.last_start[1])
                     img = cv2.circle(img, (last_x_start, last_y_start),
-                                     5, (0, 255, 255), -1)
+                                     10, (0, 255, 255), -1)
 
                     for i, node in enumerate(self.last_path):
                         lat, long = self.graph[node]["latlon"]
                         x, y = self.scale_points(lat, long)
-                        img = cv2.circle(img, (x, y), 5, (0, 255, 255), -1)
+                        img = cv2.circle(img, (x, y), 10, (0, 255, 255), -1)
                         if i > 0:
                             lat, long = self.graph[self.last_path[i-1]]["latlon"]
                             x2, y2 = self.scale_points(lat, long)
-                            cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 2)
+                            cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 3)
                         if i == 0:
                             cv2.line(img, (x, y),
                                      (last_x_start, last_y_start),
-                                     (0, 255, 255), 2)
+                                     (0, 255, 255), 3)
                     # Plot a line connecting the end and start
                     cv2.line(img, (x, y), (last_x_end, last_y_end),
-                             (0, 255, 255), 2)
+                             (0, 255, 255), 3)
+            for route in self.graph:
+                for neigh in self.graph[route]["neigh"]:
+                    lat, long = self.graph[route]["latlon"]
+                    lat2, long2 = self.graph[neigh]["latlon"]
+                    x, y = self.scale_points(lat, long)
+                img = cv2.putText(img, str(route), (x, y),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         if not get_image:
             cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
             cv2.imshow('Pennovation', img)

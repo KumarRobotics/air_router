@@ -307,7 +307,7 @@ class Navigator:
                 target_pos = self.outer.planner.mission.waypoints[target]
                 target_px = self.outer.planner.scale_points(target_pos[0],
                                                             target_pos[1])
-                img = cv2.circle(img, tuple(target_px), 5, (0, 0, 255), -1)
+                img = cv2.circle(img, tuple(target_px), 10, (0, 0, 255), 2)
                 self.outer.vis_pub.publish(cv_to_ros(img))
 
                 rospy.loginfo(f"{rospy.get_name()}: Exploration - Going to waypoint %s", target)
@@ -386,8 +386,8 @@ class Navigator:
                                                             target_pos[1])
                 robot_target_px = self.outer.planner.scale_points(robot_target.x,
                                                                   robot_target.y)
-                img = cv2.circle(img, tuple(target_px), 5, (0, 0, 255), -1)
-                img = cv2.circle(img, tuple(robot_target_px), 5, (0, 255, 0), -1)
+                img = cv2.circle(img, tuple(target_px), 10, (0, 0, 255), 2)
+                img = cv2.circle(img, tuple(robot_target_px), 10, (0, 255, 0), 2)
                 self.outer.vis_pub.publish(cv_to_ros(img))
 
                 while (not self.outer.arrived_at_waypoint(target) and
