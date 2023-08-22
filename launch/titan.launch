@@ -2,10 +2,13 @@
 <launch>
   <arg name="output" default="screen"/>
 
+  <arg name="ns" default="quadrotor"/>
+
   <arg name="initial_expl_time" default="300"/>
   <arg name="short_expl_time" default="120"/>
   <arg name="after_search_time" default="15"/>
   <arg name="tracking_time" default="60"/>
+  <arg name="do_explore" default="True"/>
 
   <arg name="recent_pose_time_threshold" default="120"/>
   <arg name="acceptance_radius" default="6"/>
@@ -16,6 +19,7 @@
 
   <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">
     <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
+    <param name="ns" value="$(arg ns)"/>
     <param name="sim" value="$(arg sim)"/>
     <param name="world_config_path" value="$(arg world_config_path)"/>
   </node>
@@ -26,6 +30,7 @@
     <param name="after_search_time" value="$(arg after_search_time)"/>
     <param name="recent_pose_time_threshold" value="$(arg recent_pose_time_threshold)"/>
     <param name="robot_list" value="$(arg robot_list)"/>
+    <param name="do_explore" value="$(arg do_explore)"/>
   </node>
 
   <node pkg="image_transport" type="republish"

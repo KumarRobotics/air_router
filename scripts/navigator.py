@@ -25,6 +25,7 @@ creates a plan for performing the action using the router.
 # Default acceptance radius for the UAV in meters
 DEFAULT_ACCEPTANCE_RADIUS = 3
 
+
 def cv_to_ros(img):
     image_msg = Image()
     image_msg.encoding = "bgr8"
@@ -33,6 +34,7 @@ def cv_to_ros(img):
     image_msg.step = image_msg.width * 3
     image_msg.data = img.tobytes()
     return image_msg
+
 
 class Navigator:
     # Modes for the navigator:
@@ -52,6 +54,8 @@ class Navigator:
 
     def __init__(self):
         rospy.init_node('navigator', anonymous=False)
+
+        self.ns = rospy.get_param("~ns", "quadrotor")
 
         # Get the acceptance radius for the UAV, which should be an integer
         # between 1 and 20
@@ -73,7 +77,8 @@ class Navigator:
             rospy.signal_shutdown("World_config_path is not set")
             return
         self.world_config_path = rospy.get_param("~world_config_path")
-        rospy.loginfo(f"{rospy.get_name()}: World config path: {self.world_config_path}")
+        rospy.loginfo(
+            f"{rospy.get_name()}: World config path: {self.world_config_path}")
         # Get the base path from the world_config_path
         path = os.path.dirname(self.world_config_path)
         with open(self.world_config_path, "r") as f:
@@ -82,7 +87,8 @@ class Navigator:
 
         # Does the map config file exist?
         if not os.path.exists(self.map):
-            rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
+            rospy.logfatal(
+                f"{rospy.get_name()}: Map config file does not exist")
             rospy.signal_shutdown("Map config file does not exist")
             return
         assert isinstance(self.sim, bool)
@@ -123,7 +129,7 @@ class Navigator:
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
         if self.sim:
-            rospy.Subscriber("/unity_ros/quadrotor/TrueState/pose",
+            rospy.Subscriber(f"/unity_ros/{self.ns}/TrueState/pose",
                              PoseStamped, self.pose_callback)
         else:
             rospy.Subscriber("mavros/global_position/global",
@@ -186,7 +192,7 @@ class Navigator:
             # Go find the robot
             self.robot_target = data.goal.point
             self.goto_target_thread = self.GoToTargetThread(self,
-                                                           self.stop_go_to_target)
+                                                            self.stop_go_to_target)
             self.goto_target_thread.daemon = True
             self.set_mode(self.Mode.go_to_target)
             self.goto_target_thread.start()
@@ -200,7 +206,7 @@ class Navigator:
             # Go find the robot
             self.robot_target = data.goal.point
             self.goto_target_thread = self.GoToTargetThread(self,
-                                                           self.stop_go_to_target)
+                                                            self.stop_go_to_target)
             self.goto_target_thread.daemon = True
             self.set_mode(self.Mode.go_to_target)
             self.goto_target_thread.start()
@@ -218,7 +224,8 @@ class Navigator:
             else:
                 alt = 40
             self.robot_target = Point(p[0], p[1], alt)
-            self.goto_target_thread = self.GoToTargetThread(self, self.stop_go_to_target)
+            self.goto_target_thread = self.GoToTargetThread(
+                self, self.stop_go_to_target)
             self.goto_target_thread.daemon = True
             self.goto_target_thread.start()
             self.goto_target_thread.join()
@@ -310,7 +317,8 @@ class Navigator:
                 img = cv2.circle(img, tuple(target_px), 5, (0, 0, 255), -1)
                 self.outer.vis_pub.publish(cv_to_ros(img))
 
-                rospy.loginfo(f"{rospy.get_name()}: Exploration - Going to waypoint %s", target)
+                rospy.loginfo(
+                    f"{rospy.get_name()}: Exploration - Going to waypoint %s", target)
                 while (not self.outer.arrived_at_waypoint(target) and
                        not rospy.is_shutdown() and
                        not self.stop_event.is_set()):
@@ -320,7 +328,8 @@ class Navigator:
                     if target == self.outer.end_waypt:
                         self.outer.set_mode(self.outer.Mode.explore_end)
                         return
-                    self.outer.explore_target_waypt = self.outer.explore_target_waypt[1:] + [target]
+                    self.outer.explore_target_waypt = self.outer.explore_target_waypt[1:] + [
+                        target]
 
     class GoToTargetThread(threading.Thread):
         def __init__(self, outer, stop_event):
@@ -350,17 +359,20 @@ class Navigator:
                                                  [robot_target.x,
                                                   robot_target.y])
             if route is None:
-                rospy.logerr(f"{rospy.get_name()}: GoToTarget - Could not find route.")
+                rospy.logerr(
+                    f"{rospy.get_name()}: GoToTarget - Could not find route.")
                 return
 
             if len(route) == 0:
-                rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Already at the target.")
+                rospy.loginfo(
+                    f"{rospy.get_name()}: GoToTarget - Already at the target.")
                 return
 
             # Check if we are already at the first waypoint
             if self.outer.arrived_at_waypoint(route[0]):
                 if len(route) == 1:
-                    rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Already at the target.")
+                    rospy.loginfo(
+                        f"{rospy.get_name()}: GoToTarget - Already at the target.")
                     return
                 else:
                     route = route[1:]
@@ -387,7 +399,8 @@ class Navigator:
                 robot_target_px = self.outer.planner.scale_points(robot_target.x,
                                                                   robot_target.y)
                 img = cv2.circle(img, tuple(target_px), 5, (0, 0, 255), -1)
-                img = cv2.circle(img, tuple(robot_target_px), 5, (0, 255, 0), -1)
+                img = cv2.circle(img, tuple(robot_target_px),
+                                 5, (0, 255, 0), -1)
                 self.outer.vis_pub.publish(cv_to_ros(img))
 
                 while (not self.outer.arrived_at_waypoint(target) and
@@ -398,7 +411,8 @@ class Navigator:
                 # Check if we made it to the end
                 if len(route) == 0 and self.outer.arrived_at_waypoint(target):
                     self.outer.set_mode(self.outer.Mode.go_to_target_end)
-                    rospy.loginfo(f"{rospy.get_name()}: GoToTarget: reached goal")
+                    rospy.loginfo(
+                        f"{rospy.get_name()}: GoToTarget: reached goal")
                     return
 
 
