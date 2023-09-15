@@ -117,6 +117,8 @@ class Navigator:
         # List of waypoints for exploration
         self.waypoint_list = list(self.planner.mission.waypoints.keys())
         self.explore_target_waypt = self.waypoint_list.copy()
+        self.explore_target_waypt *= 100  # hack 
+
         self.end_waypt = self.explore_target_waypt[-1]
 
         # UAV pose keeps the pose of the UAV in standard coordinates:
