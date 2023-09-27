@@ -403,11 +403,13 @@ class Path_planner():
         old_x = None
         old_y = None
         img = self.img.copy()
+        # Make img rgba
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
         if origin:
             # Display the origin in the image
             img = cv2.circle(img, (int(self.image_origin_px_x*self.scale_factor),
                                    int(self.image_origin_px_y*self.scale_factor)),
-                             thickness=2, radius=10, color=(0, 0, 255))
+                             thickness=2, radius=10, color=(20, 20, 20))
         if waypoints:
             for i in self.mission.waypoints:
                 wp = self.mission.waypoints[i]
@@ -416,8 +418,8 @@ class Path_planner():
                 if old_x is not None and old_y is not None:
                     img = cv2.line(img, (old_x, old_y), (x, y), (0, 255, 0), 2)
                 img = cv2.circle(img, (x, y), 10, (0, 255, 0), -1)
-                img = cv2.putText(img, str(i), (x, y),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                img = cv2.putText(img, str(i), (x+10, y-10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
                 old_x = x
                 old_y = y
 
@@ -434,22 +436,26 @@ class Path_planner():
             img = self.draw_poly_nofly(img, filled=False)
 
         if routes:
+            overlay = img.copy()
             for route in self.graph:
                 for neigh in self.graph[route]["neigh"]:
                     lat, long = self.graph[route]["latlon"]
                     lat2, long2 = self.graph[neigh]["latlon"]
                     x, y = self.scale_points(lat, long)
                     x2, y2 = self.scale_points(lat2, long2)
-                    cv2.line(img, (x, y), (x2, y2), (255, 255, 0), 2)
+                    cv2.line(overlay, (x, y), (x2, y2), (0, 255, 0), 2)
+            alpha = 0.25
+            result = cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0)
+            img = result
 
             for route in self.graph:
                 for neigh in self.graph[route]["neigh"]:
                     lat, long = self.graph[route]["latlon"]
                     lat2, long2 = self.graph[neigh]["latlon"]
                     x, y = self.scale_points(lat, long)
-                img = cv2.circle(img, (x, y), 10, (255, 100, 0), -1)
-                img = cv2.putText(img, str(route), (x, y),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                img = cv2.circle(img, (x, y), 10, (100, 255, 0), -1)
+                # img = cv2.putText(img, str(route), (x, y),
+                #                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         if plan:
             with self.lock:
@@ -485,13 +491,15 @@ class Path_planner():
                     lat, long = self.graph[route]["latlon"]
                     lat2, long2 = self.graph[neigh]["latlon"]
                     x, y = self.scale_points(lat, long)
-                img = cv2.putText(img, str(route), (x, y),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                # img = cv2.putText(img, str(route), (x, y),
+                #                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         if not get_image:
             cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
             cv2.imshow('Pennovation', img)
             cv2.waitKey(0)
         else:
+            # make img rgb
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             return img
 
 
@@ -521,6 +529,7 @@ if __name__ == "__main__":
         end_latlon = [random.uniform(-130, 130),
                       random.uniform(-100, 100)]
         print(f"Start: {start_latlon} - End: {end_latlon}")
+        # Check if start or end are within no fly zones
         route = q.planRoute(start_latlon, end_latlon)
         if route is not None:
             q.display_points(noFly=True, routes=True, plan=True)
