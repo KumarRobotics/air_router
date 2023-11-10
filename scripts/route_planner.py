@@ -18,8 +18,6 @@ be obtained from UTM (for GPS files) or as absolute coordinates for simulation
 files """
 # FIXME(fclad): The file refers to "latlon" when using standard coordinates.
 
-MAXIMUM_EDGE_DISTANCE = 100
-
 
 class Mission():
     """ Get a mission file and convert it to standard coordinates """
@@ -93,13 +91,22 @@ class Mission():
 
 
 class Path_planner():
-    def __init__(self, map_path):
+    def __init__(self, map_path, max_edge_length):
         # Store the last path for visualization purposes
         self.last_start = None
         self.last_end = None
         self.last_path = None
         # Create a lock for the visualization objects
         self.lock = threading.Lock()
+        self.max_edge_length = max_edge_length
+        self.map_path = map_path
+
+        # Check that max eddge len is a positive number below 500
+        if not isinstance(self.max_edge_length, int):
+            pdb.set_trace()
+            sys.exit("Error: max_edge_lenght must be an integer")
+        if self.max_edge_length > 500 or self.max_edge_length < 1:
+            sys.exit("Error: max_edge_length must be between 1 and 500")
 
         # Get the image from semantics_manager
         with open(map_path, 'r') as f:
@@ -145,7 +152,6 @@ class Path_planner():
         # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
         # self.img = cv2.convertScaleAbs(self.img, alpha=2.5, beta=0)
         # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
-
 
 
         # Create mission object. Only QGC missions have GPS coordinates for the
@@ -234,7 +240,7 @@ class Path_planner():
         for i in points:
             for j in points[i]["neigh"].copy():
                 d = self.getDistance(points[i]["latlon"], points[j]["latlon"])
-                if d > MAXIMUM_EDGE_DISTANCE:
+                if d > self.max_edge_length:
                     del points[i]["neigh"][j]
 
         # Create a mask for the no-fly zone
@@ -464,7 +470,7 @@ class Path_planner():
                     last_x_end, last_y_end = self.scale_points(self.last_end[0],
                                                                self.last_end[1])
                     img = cv2.circle(img, (last_x_end, last_y_end),
-                                     10, (0, 255, 255), -1)
+                                     10, (128, 255, 255), -1)
 
                     last_x_start, last_y_start = self.scale_points(self.last_start[0],
                                                                    self.last_start[1])
@@ -483,9 +489,9 @@ class Path_planner():
                             cv2.line(img, (x, y),
                                      (last_x_start, last_y_start),
                                      (0, 255, 255), 3)
-                    # Plot a line connecting the end and start
-                    cv2.line(img, (x, y), (last_x_end, last_y_end),
-                             (0, 255, 255), 3)
+                    # Plot a line connecting the end and the last node
+                    # cv2.line(img, (x, y), (last_x_end, last_y_end),
+                    #          (0, 255, 255), 3)
             for route in self.graph:
                 for neigh in self.graph[route]["neigh"]:
                     lat, long = self.graph[route]["latlon"]
@@ -493,6 +499,11 @@ class Path_planner():
                     x, y = self.scale_points(lat, long)
                 # img = cv2.putText(img, str(route), (x, y),
                 #                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+        # print the max edge length and map at the top
+        cv2.putText(img, f"Max Edge Length: {self.max_edge_length}m",
+                    (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         if not get_image:
             cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
             cv2.imshow('Pennovation', img)
@@ -511,15 +522,22 @@ if __name__ == "__main__":
     parser.add_argument('--map_name',
                         help='Map name to use from semantics_manager',
                         required=True)
+    parser.add_argument('--max_edge_length',
+                        help='Max edge length for the graph',
+                        required=False, default=100, type=int)
     args = parser.parse_args()
 
     import rospkg
     rospack = rospkg.RosPack()
     semantics_path = rospack.get_path('semantics_manager')
     map_path = os.path.join(semantics_path, "maps", args.map_name, "map_config.yaml")
+    max_edge_length = args.max_edge_length
+
+    print(f"Map path: {map_path}")
+    print(f"Max edge length: {args.max_edge_length}")
 
     # Create a path planner object
-    q = Path_planner(map_path)
+    q = Path_planner(map_path, max_edge_length)
     q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
