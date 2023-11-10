@@ -24,6 +24,7 @@ creates a plan for performing the action using the router.
 
 # Default acceptance radius for the UAV in meters
 DEFAULT_ACCEPTANCE_RADIUS = 3
+DEFAULT_MAX_EDGE_LENGTH = 100
 
 def cv_to_ros(img):
     image_msg = Image()
@@ -80,6 +81,14 @@ class Navigator:
             world_config = yaml.safe_load(f)
         self.map = os.path.join(path, world_config["map"])
 
+        # Get the edge length for route planner
+        self.max_edge_length = rospy.get_param("~max_edge_length",
+                                               DEFAULT_MAX_EDGE_LENGTH)
+        if not isinstance(self.max_edge_length, int) or \
+                self.max_edge_length < 1 or self.max_edge_length > 500:
+            rospy.logerr(f"{rospy.get_name()}: \
+                    Max edge length should be an integer between 1 and 500")
+
         # Does the map config file exist?
         if not os.path.exists(self.map):
             rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
@@ -87,11 +96,12 @@ class Navigator:
             return
         assert isinstance(self.sim, bool)
         rospy.loginfo(f"{rospy.get_name()}: Map: {self.map}")
+        rospy.loginfo(f"{rospy.get_name()}: Max edge length: {self.max_edge_length}")
         rospy.loginfo(f"{rospy.get_name()}: Sim: {self.sim}")
         rospy.loginfo(f"{rospy.get_name()}: AR: {self.acceptance_radius}")
 
         # Create a path planner object
-        self.planner = route_planner.Path_planner(self.map)
+        self.planner = route_planner.Path_planner(self.map, self.max_edge_length)
 
         # Initially, the navigator is in the init mode. We will wait for an
         # order from the state machine

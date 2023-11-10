@@ -52,6 +52,7 @@ if __name__ == "__main__":
     rospy.init_node('test_integration', anonymous=False)
     # get map_name from the params
     map_name = rospy.get_param("~map_name")
+    max_edge_length = rospy.get_param("~max_edge_length")
 
     # Get map config
     import rospkg
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     air_router_path = os.path.join(rospack.get_path('air_router'), "scripts")
     sys.path.append(air_router_path)
     import route_planner
-    p = route_planner.Path_planner(map_path)
+    p = route_planner.Path_planner(map_path, max_edge_length)
     wp = p.mission.waypoints
 
     # Create publisher for /unity_ros/quadrotor/Truestate/pose
