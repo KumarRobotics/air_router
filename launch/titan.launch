@@ -9,6 +9,7 @@
 
   <arg name="recent_pose_time_threshold" default="120"/>
   <arg name="acceptance_radius" default="6"/>
+  <arg name="max_edge_length" default="100" />
 
   <arg name="sim" default="true"/>
   <arg name="robot_list" default="io,callisto,europa"/>
@@ -18,6 +19,7 @@
     <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
     <param name="sim" value="$(arg sim)"/>
     <param name="world_config_path" value="$(arg world_config_path)"/>
+    <param name="max_edge_length" value="$(arg max_edge_length)"/>
   </node>
 
   <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">

@@ -10,16 +10,20 @@
   <arg name="tracking_time" default="10"/>
   <arg name="acceptance_radius" default="2"/>
   <arg name="sim" default="true"/>
+  <arg name="max_edge_length" default="101" />
   <arg name="robot_list" default="io,callisto"/>
   <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
 
-  <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">
+  <node pkg="air_router" type="navigator.py" name="navigator"
+    required="true" output="$(arg output)">
     <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
     <param name="sim" value="$(arg sim)"/>
     <param name="world_config_path" value="$(arg world_config_path)"/>
+    <param name="max_edge_length" value="$(arg max_edge_length)"/>
   </node>
 
-  <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
+  <node pkg="air_router" type="state_machine.py" name="state_machine"
+    required="true" output="$(arg output)">
     <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
     <param name="short_exploration_time" value="$(arg short_expl_time)"/>
     <param name="after_search_time" value="$(arg after_search_time)"/>
@@ -32,6 +36,7 @@
   <node pkg="air_router" type="test_integration.py" name="test_integration"
     required="true" output="$(arg output)">
     <param name="map_name" value="dynamic_unity_urban"/>
+    <param name="max_edge_length" value="$(arg max_edge_length)"/>
   </node>
 
 </launch>
