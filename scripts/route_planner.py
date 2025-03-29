@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
+import argparse
+import heapq
+import json
 import os
 import pdb
-import argparse
-import cv2
-import sys
-import yaml
-import random
 import pprint
-import utm
-import numpy as np
-import heapq
-import rospy
+import random
+import sys
 import threading
+
+import cv2
+import numpy as np
+import rospy
+import utm
+import yaml
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
 be obtained from UTM (for GPS files) or as absolute coordinates for simulation
@@ -525,6 +527,9 @@ if __name__ == "__main__":
     parser.add_argument('--max_edge_length',
                         help='Max edge length for the graph',
                         required=False, default=100, type=int)
+    parser.add_argument('--save_graph',
+                        help='Save the waypoint graph as a json',
+                        action='store_true', required=False)
     args = parser.parse_args()
 
     import rospkg
@@ -536,8 +541,13 @@ if __name__ == "__main__":
     print(f"Map path: {map_path}")
     print(f"Max edge length: {args.max_edge_length}")
 
+
     # Create a path planner object
     q = Path_planner(map_path, max_edge_length)
+    if args.save_graph:
+        graph_sanitized = {i: {'utm': q.graph[i]['latlon'], 'edges': q.graph[i]['neigh']} for i in q.graph}
+        with open('graph_dump.json', 'w') as json_file:
+            json.dump(graph_sanitized, json_file, indent=4)
     q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
