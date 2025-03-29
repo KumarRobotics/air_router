@@ -22,7 +22,7 @@
     <param name="max_edge_length" value="$(arg max_edge_length)"/>
   </node>
 
-  <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
+  <node pkg="air_router" type="robot_finder.py" name="robot_finder" required="true" output="$(arg output)">
     <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
     <param name="short_exploration_time" value="$(arg short_expl_time)"/>
     <param name="after_search_time" value="$(arg after_search_time)"/>
