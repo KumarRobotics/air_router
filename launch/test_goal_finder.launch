@@ -19,6 +19,7 @@
 
   <node pkg="air_router" type="goal_finder.py" name="goal_finder"
     required="true" output="$(arg output)">
+    <!--param name="use_zmq" value="True"/ -->
   </node>
 
   <!-- Load the test node -->
