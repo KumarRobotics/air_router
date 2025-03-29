@@ -148,6 +148,7 @@ class Navigator:
         # Create threads for the different modes
         self.stop_exploration = threading.Event()
         self.stop_go_to_target = threading.Event()
+        self.explore_thread = None
 
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
@@ -205,6 +206,14 @@ class Navigator:
             self.explore_thread.daemon = True
             self.set_mode(self.Mode.explore)
             self.explore_thread.start()
+        elif self.mode is self.Mode.init and data.action == "go to robot":
+            self.robot_target = data.goal.point
+            self.goto_target_thread = self.GoToTargetThread(
+                self, self.stop_go_to_target
+            )
+            self.goto_target_thread.daemon = True
+            self.set_mode(self.Mode.go_to_target)
+            self.goto_target_thread.start()
 
         elif self.mode == self.Mode.explore and data.action == "explore":
             return
@@ -226,9 +235,12 @@ class Navigator:
             or self.mode == self.Mode.go_to_target_end
             and data.action == "go to robot"
         ):
-            # Signal the exploration thread to stop
-            self.stop_exploration.set()
-            self.explore_thread.join()
+            # Signal the exploration thread to stop, only if we started
+            # exploring before
+            if self.explore_thread is not None:
+                self.stop_exploration.set()
+                self.explore_thread.join()
+                self.explore_thread = None
             # Go find the robot
             self.robot_target = data.goal.point
             self.goto_target_thread = self.GoToTargetThread(
