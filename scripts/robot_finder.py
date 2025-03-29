@@ -176,7 +176,7 @@ class StateMachine:
         tracking = auto()
 
     def __init__(self):
-        rospy.init_node("state_machine")
+        rospy.init_node("robot_finder")
 
         # get parameters for the node
         if not rospy.has_param("~initial_exploration_time"):
