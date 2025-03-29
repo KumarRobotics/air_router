@@ -23,7 +23,7 @@ class ZMQ_thread(threading.Thread):
         self.outer = outer
 
     def run(self):
-        while not rospy.is_shutdown():
+        while not self.outer.stop_event.is_set():
             # rospy.loginfo(f"Thread - Waiting for msg")
             msg = self.zac_socket.recv_pyobj()
             point = PointStamped()
@@ -58,7 +58,7 @@ class GoalFinder:
         rospy.Subscriber("air_router/navigator/state", String, self.update_state)
 
         header = Header(0, rospy.get_rostime(), "quad")
-        point = Point(0, 0, 0)
+        point = Point(-37, 96, 50)
         self.current_goal = PointStamped(header, point)
 
         # This is where we get the goal position
@@ -72,7 +72,7 @@ class GoalFinder:
         # Otherwise we use a ros topic
         if rospy.has_param("~use_zmq"):
             rospy.logwarn(f"{rospy.get_name()}: Using ZMQ to get the target goal")
-            # self.stop_event = threading.Event()
+            self.stop_event = threading.Event()
             self.socket_thread = ZMQ_thread(self)
             self.socket_thread.run()
 
