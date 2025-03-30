@@ -438,28 +438,40 @@ class Navigator:
                 # arrived, send the next waypoint
                 self.outer.send_waypoint_uav(target)
 
-                # Visualize the waypoint sent
-                img = self.outer.planner.display_points(
-                    get_image=True, routes=True, plan=True, noFly=True
-                )
-                target_pos = self.outer.planner.mission.waypoints[target]
-                target_px = self.outer.planner.scale_points(
-                    target_pos[0], target_pos[1]
-                )
-                robot_target_px = self.outer.planner.scale_points(
-                    robot_target.x, robot_target.y
-                )
-                img = cv2.circle(img, tuple(target_px), 10, (0, 0, 255), 2)
-                img = cv2.circle(img, tuple(robot_target_px), 10, (0, 255, 0), 2)
-                self.outer.vis_pub.publish(cv_to_ros(img))
-
+                decimator = 0
                 while (
                     not self.outer.arrived_at_waypoint(target)
                     and not rospy.is_shutdown()
                     and not self.stop_event.is_set()
                 ):
-                    # Wait to arrive at the waypoint
+                    # Wait to arrive at the waypoint and publish images at 0.5
+                    # hz
+                    if decimator % 20 == 0:
+                        # Visualize the waypoint sent
+                        img = self.outer.planner.display_points(
+                            get_image=True, routes=True, plan=True, noFly=True
+                        )
+                        target_pos = self.outer.planner.mission.waypoints[target]
+                        target_px = self.outer.planner.scale_points(
+                            target_pos[0], target_pos[1]
+                        )
+                        robot_target_px = self.outer.planner.scale_points(
+                            robot_target.x, robot_target.y
+                        )
+                        uav_pos = self.outer.uav_pose.pose.position
+                        uav_pos_px = self.outer.planner.scale_points(
+                            uav_pos.x, uav_pos.y
+                        )
+                        img = cv2.circle(img, tuple(target_px), 10, (0, 0, 255), 2)
+                        img = cv2.circle(
+                            img, tuple(robot_target_px), 10, (0, 255, 0), 2
+                        )
+                        img = cv2.circle(img, tuple(uav_pos_px), 8, (0, 150, 255), -1)
+                        self.outer.vis_pub.publish(cv_to_ros(img))
+                        decimator = 0
+                    decimator += 1
                     rate.sleep()
+
                 # Check if we made it to the end
                 if len(route) == 0 and self.outer.arrived_at_waypoint(target):
                     self.outer.set_mode(self.outer.Mode.go_to_target_end)
