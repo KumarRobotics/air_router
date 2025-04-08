@@ -22,7 +22,7 @@
     <param name="max_edge_length" value="$(arg max_edge_length)"/>
   </node>
 
-  <node pkg="air_router" type="state_machine.py" name="state_machine"
+  <node pkg="air_router" type="robot_finder.py" name="robot_finder"
     required="true" output="$(arg output)">
     <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
     <param name="short_exploration_time" value="$(arg short_expl_time)"/>
@@ -33,7 +33,7 @@
   </node>
 
   <!-- Load the test node -->
-  <node pkg="air_router" type="test_integration.py" name="test_integration"
+  <node pkg="air_router" type="test_robot_finder.py" name="test_robot_finder"
     required="true" output="$(arg output)">
     <param name="map_name" value="dynamic_unity_urban"/>
     <param name="max_edge_length" value="$(arg max_edge_length)"/>

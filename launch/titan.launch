@@ -1,19 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
+  <!-- ==================== PARAMETERS ==================== -->
   <arg name="output" default="screen"/>
+  <arg name="finder_type" default="robot_finder" />
 
-  <arg name="initial_expl_time" default="300"/>
-  <arg name="short_expl_time" default="120"/>
-  <arg name="after_search_time" default="15"/>
-  <arg name="tracking_time" default="60"/>
+  <!-- Map configuration -->
+  <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
 
+  <!-- Use sim -->
+  <arg name="sim" default="true"/>
+
+  <!-- Navigator parameters -->
   <arg name="recent_pose_time_threshold" default="120"/>
   <arg name="acceptance_radius" default="6"/>
   <arg name="max_edge_length" default="100" />
 
-  <arg name="sim" default="true"/>
+  <!-- Robot_finder parameters -->
+  <arg name="initial_expl_time" default="300"/>
+  <arg name="short_expl_time" default="120"/>
+  <arg name="after_search_time" default="15"/>
+  <arg name="tracking_time" default="60"/>
   <arg name="robot_list" default="io,callisto,europa"/>
-  <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
+
+  <!-- Goal_finder parameters -->
+  <arg name="use_zmq" default="false" />
+
+  <!-- ==================== LAUNCH NODES ================== -->
 
   <node pkg="air_router" type="navigator.py" name="navigator" required="true" output="$(arg output)">
     <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
@@ -22,17 +34,23 @@
     <param name="max_edge_length" value="$(arg max_edge_length)"/>
   </node>
 
-  <node pkg="air_router" type="state_machine.py" name="state_machine" required="true" output="$(arg output)">
-    <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
-    <param name="short_exploration_time" value="$(arg short_expl_time)"/>
-    <param name="after_search_time" value="$(arg after_search_time)"/>
-    <param name="recent_pose_time_threshold" value="$(arg recent_pose_time_threshold)"/>
-    <param name="robot_list" value="$(arg robot_list)"/>
-  </node>
-
   <node pkg="image_transport" type="republish"
     name="republish" required="true"
     args="raw in:=/air_router/navigator/viz compressed out:=/air_router/navigator/viz">
   </node>
 
+  <group if="$(eval arg('finder_type') == 'robot_finder')">
+    <node pkg="air_router" type="robot_finder.py" name="robot_finder" required="true" output="$(arg output)">
+      <param name="initial_exploration_time" value="$(arg initial_expl_time)"/>
+      <param name="short_exploration_time" value="$(arg short_expl_time)"/>
+      <param name="after_search_time" value="$(arg after_search_time)"/>
+      <param name="recent_pose_time_threshold" value="$(arg recent_pose_time_threshold)"/>
+      <param name="robot_list" value="$(arg robot_list)"/>
+    </node>
+  </group>
+  <group if="$(eval arg('finder_type') == 'goal_finder')">
+    <node pkg="air_router" type="goal_finder.py" name="goal_finder" required="true" output="$(arg output)">
+      <param name="use_zmq" value="True"/>
+    </node>
+  </group>
 </launch>

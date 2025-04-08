@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+
+  <arg name="output" default="screen"/>
+
+  <arg name="acceptance_radius" default="2"/>
+  <arg name="sim" default="true"/>
+  <arg name="max_edge_length" default="101" />
+  <arg name="robot_list" default="io,callisto"/>
+  <arg name="world_config_path" default="$(find semantics_manager)/config/config_sim.yaml"/>
+
+  <node pkg="air_router" type="navigator.py" name="navigator"
+    required="true" output="$(arg output)">
+    <param name="acceptance_radius" value="$(arg acceptance_radius)"/>
+    <param name="sim" value="$(arg sim)"/>
+    <param name="world_config_path" value="$(arg world_config_path)"/>
+    <param name="max_edge_length" value="$(arg max_edge_length)"/>
+  </node>
+
+  <node pkg="air_router" type="goal_finder.py" name="goal_finder"
+    required="true" output="$(arg output)">
+    <!--param name="use_zmq" value="True"/ -->
+  </node>
+
+  <!-- Load the test node -->
+  <node pkg="air_router" type="test_goal_finder.py" name="test_goal_finder"
+    required="true" output="$(arg output)">
+    <param name="map_name" value="dynamic_unity_urban"/>
+    <param name="max_edge_length" value="$(arg max_edge_length)"/>
+  </node>
+
+</launch>
