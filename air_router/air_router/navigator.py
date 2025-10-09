@@ -10,7 +10,7 @@ import numpy as np
 import rospy
 import utm
 import yaml
-from air_router.msg import Goal
+from router_interfaces.msg import Goal
 from geometry_msgs.msg import Point, PointStamped, PoseStamped
 from mavros_msgs.srv import SetMode, WaypointSetCurrent
 from sensor_msgs.msg import Image, NavSatFix

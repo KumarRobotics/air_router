@@ -4,7 +4,7 @@ package_name = 'air_router'
 
 setup(
     name=package_name,
-    version='0.0.0',
+    version='1.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -13,10 +13,10 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='jonathan',
-    maintainer_email='jonathan.a.diller@gmail.com',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    maintainer='fclad',
+    maintainer_email='fclad@seas.upenn.edu',
+    description='air_router routes your quad to satisfy all your communication needs',
+    license='MIT',
     extras_require={
         'test': [
             'pytest',
@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'test_node = air_router.test_node:main'
+            'navigator = air_router.test_node:main'
         ],
     },
 )
