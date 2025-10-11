@@ -11,7 +11,8 @@ import threading
 
 import cv2
 import numpy as np
-import rospy
+# import rospy
+import rclpy
 import utm
 import yaml
 
@@ -275,9 +276,10 @@ class Path_planner():
             # Check that we have at least one route to all the waypoints
             # shutdown node otherwise
             if len(points[i]["neigh"]) == 0:
-                rospy.logerr("No route to waypoint {}".format(i))
-                rospy.signal_shutdown("No route to waypoint {}".format(i))
+                rclpy.node.get_logger("route_planner").error("No route to waypoint {}".format(i))
+                # rospy.signal_shutdown("No route to waypoint {}".format(i))
                 # return
+                rclpy.shutdown()
 
         # Fill the neighbor distances
         for i in points:
@@ -299,11 +301,11 @@ class Path_planner():
 
         if start_x < 0 or start_x > self.img.shape[1] or \
                 start_y < 0 or start_y > self.img.shape[0]:
-            rospy.logerr("Start point outside image range")
+            rclpy.node.get_logger("route_planner").error("Start point outside image range")
             return None
         if end_x < 0 or end_x > self.img.shape[1] or \
                 end_y < 0 or end_y > self.img.shape[0]:
-            rospy.logerr("End point outside image range")
+            rclpy.node.get_logger("route_planner").error("End point outside image range")
             return None
 
         # Check that the points are within the allowed geofence
@@ -324,7 +326,7 @@ class Path_planner():
         point_mask = cv2.circle(point_mask, (end_x, end_y),
                                 10, 255, 2)
         if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
-            rospy.logerr("Start or end point is outside the allowed geofence")
+            rclpy.node.get_logger("route_planner").error("Start or end point is outside the allowed geofence")
             return None
 
         # Find the closest waypoint to the start and end
@@ -376,7 +378,7 @@ class Path_planner():
                                                    self.polygon_mask)
                     # Check if the line intersects with the noFly zone
                     if cv2.countNonZero(intersection) == 0:
-                        rospy.loginfo("Removing first waypoint")
+                        rclpy.node.get_logger("route_planner").info("Removing first waypoint")
                         self.last_path.pop(0)
 
         return self.last_path.copy()

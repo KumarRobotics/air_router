@@ -7,7 +7,7 @@ from os import wait
 
 import cv2
 import numpy as np
-import rospy
+# import rospy
 import utm
 import yaml
 from router_interfaces.msg import Goal
@@ -16,7 +16,10 @@ from mavros_msgs.srv import SetMode, WaypointSetCurrent
 from sensor_msgs.msg import Image, NavSatFix
 from std_msgs.msg import String
 
-import route_planner
+import rclpy
+from rclpy.node import Node
+
+from air_router import route_planner
 
 """Navigator:
 This node is responsible for navigating the UAV along the waypoints. It
@@ -27,6 +30,7 @@ creates a plan for performing the action using the router.
 # Default acceptance radius for the UAV in meters
 DEFAULT_ACCEPTANCE_RADIUS = 3
 DEFAULT_MAX_EDGE_LENGTH = 100
+DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
 
 
 def cv_to_ros(img):
@@ -39,7 +43,7 @@ def cv_to_ros(img):
     return image_msg
 
 
-class Navigator:
+class Navigator(Node):
     # Modes for the navigator:
     # Init: The navigator is waiting for a command from the state machine
     # Explore: the navigator is exploring the map, going sequentially through
@@ -56,37 +60,37 @@ class Navigator:
         transition = auto()
 
     def __init__(self):
-        rospy.init_node("navigator", anonymous=False)
+        super().__init__('navigator')
+
+        # Declare parameters
+        self.declare_parameter('acceptance_radius', DEFAULT_ACCEPTANCE_RADIUS)
+        self.declare_parameter('sim', True)
+        self.declare_parameter('world_config_path', DEFAULT_WORLD_PATH)
+        self.declare_parameter('max_edge_length', DEFAULT_MAX_EDGE_LENGTH)
 
         # Get the acceptance radius for the UAV, which should be an integer
         # between 1 and 20
-        self.acceptance_radius = rospy.get_param(
-            "~acceptance_radius", DEFAULT_ACCEPTANCE_RADIUS
-        )
+        self.acceptance_radius = self.get_parameter('acceptance_radius').get_parameter_value().integer_value
+
         if (
             not isinstance(self.acceptance_radius, int)
             or self.acceptance_radius < 1
             or self.acceptance_radius > 20
         ):
-            rospy.logerr(
-                f"{rospy.get_name()}: \
-                    Acceptance radius should be an integer between 1 and 20"
+            self.get_logger().info(
+                f"{self.get_name()}: Acceptance radius should be an integer between 1 and 20"
             )
-            rospy.signal_shutdown("Acceptance radius error")
+            rclpy.shutdown()
             return
 
         # Are we in simulator mode?
-        self.sim = rospy.get_param("~sim", True)
-
-        # Get the path to the map file
-        if not rospy.has_param("~world_config_path"):
-            rospy.logfatal(f"{rospy.get_name()}: world_config_path is not set")
-            rospy.signal_shutdown("World_config_path is not set")
-            return
-        self.world_config_path = rospy.get_param("~world_config_path")
-        rospy.loginfo(
-            f"{rospy.get_name()}: World config path: {self.world_config_path}"
+        self.sim = self.get_parameter('sim').get_parameter_value().bool_value
+        
+        self.world_config_path = self.get_parameter('world_config_path').get_parameter_value().string_value
+        self.get_logger().info(
+            f"{self.get_name()}: World config path: {self.world_config_path}"
         )
+
         # Get the base path from the world_config_path
         path = os.path.dirname(self.world_config_path)
         with open(self.world_config_path, "r") as f:
@@ -94,29 +98,31 @@ class Navigator:
         self.map = os.path.join(path, world_config["map"])
 
         # Get the edge length for route planner
-        self.max_edge_length = rospy.get_param(
-            "~max_edge_length", DEFAULT_MAX_EDGE_LENGTH
-        )
+        self.max_edge_length = self.get_parameter('max_edge_length').get_parameter_value().integer_value
         if (
             not isinstance(self.max_edge_length, int)
             or self.max_edge_length < 1
             or self.max_edge_length > 500
         ):
-            rospy.logerr(
-                f"{rospy.get_name()}: \
+            self.get_logger().error(
+                f"{self.get_name()}: \
                     Max edge length should be an integer between 1 and 500"
             )
+            rclpy.shutdown()
+            return
 
         # Does the map config file exist?
         if not os.path.exists(self.map):
-            rospy.logfatal(f"{rospy.get_name()}: Map config file does not exist")
-            rospy.signal_shutdown("Map config file does not exist")
+            self.get_logger().error(f"{self.get_name()}: Map config file does not exist")
+            rclpy.shutdown()
             return
         assert isinstance(self.sim, bool)
-        rospy.loginfo(f"{rospy.get_name()}: Map: {self.map}")
-        rospy.loginfo(f"{rospy.get_name()}: Max edge length: {self.max_edge_length}")
-        rospy.loginfo(f"{rospy.get_name()}: Sim: {self.sim}")
-        rospy.loginfo(f"{rospy.get_name()}: AR: {self.acceptance_radius}")
+        self.get_logger().info(f"{self.get_name()}: Map: {self.map}")
+        self.get_logger().info(f"{self.get_name()}: Max edge length: {self.max_edge_length}")
+        self.get_logger().info(f"{self.get_name()}: Sim: {self.sim}")
+        self.get_logger().info(f"{self.get_name()}: AR: {self.acceptance_radius}")
+
+        rclpy.node.get_logger("here").info("Direct info print call")
 
         # Create a path planner object
         self.planner = route_planner.Path_planner(self.map, self.max_edge_length)
@@ -126,9 +132,8 @@ class Navigator:
         # Mode gets published so other nodes can use it
         self.mode = None
         self.mode_lock = threading.Lock()
-        self.mode_pub = rospy.Publisher(
-            "air_router/navigator/state", String, queue_size=10
-        )
+        self.mode_pub = self.create_publisher(String, 'air_router/navigator/state', 10)
+
 
         # List of waypoints for exploration
         self.waypoint_list = list(self.planner.mission.waypoints.keys())
@@ -153,49 +158,46 @@ class Navigator:
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
         if self.sim:
-            rospy.Subscriber(
-                "/unity_ros/quadrotor/TrueState/pose", PoseStamped, self.pose_callback
-            )
+            self.create_subscription(PoseStamped, '/unity_ros/quadrotor/TrueState/pose', self.pose_callback, 1)
         else:
-            rospy.Subscriber(
-                "mavros/global_position/global", NavSatFix, self.gps_callback
-            )
+            self.create_subscription(NavSatFix, '/mavros/global_position/global', self.gps_callback, 1)
 
         # Publish the goal for the UAV. For simulation, we will just publish a
         # goal, for the real world, we will use the mavros interface
         if self.sim:
-            self.uav_goal = rospy.Publisher("goal", PointStamped, queue_size=10)
+            self.uav_goal = self.create_publisher(PointStamped, 'goal', 10)
         else:
-            # Service proxy for /mavros/misssion/set_current
-            rospy.wait_for_service("mavros/mission/set_current")
-            self.set_cur_wp = rospy.ServiceProxy(
-                "mavros/mission/set_current", WaypointSetCurrent
-            )
+            self.set_cur_wp = self.create_client(WaypointSetCurrent, 'mavros/mission/set_current')
+            while not self.set_cur_wp.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info('service not available, waiting again...')
 
         # Create subscribers _after loading services_ for the state machine
         # topics: goal and coordinates
-        rospy.Subscriber("air_router/goal", Goal, self.goal_callback)
+        self.create_subscription(Goal, '/air_router/goal', self.goal_callback, 1)
 
         # Create the visualization topic to debug the navigator
-        self.vis_pub = rospy.Publisher("air_router/navigator/viz", Image, queue_size=1)
+        self.vis_pub = self.create_publisher(Image, 'air_router/navigator/viz', 1)
 
-        rospy.loginfo(f"{rospy.get_name()}: Waiting for UAV pose")
-        while not rospy.is_shutdown() and self.uav_pose is None:
-            rospy.sleep(0.1)
+        self.get_logger().info(f"{self.get_name()}: Waiting for UAV pose")
+        while not rclpy.ok() and self.uav_pose is None:
+            self.get_clock().sleep_for(rclpy.duration.Duration(seconds=0.1))
 
         # Avoid race condition with state machine
-        rospy.sleep(1)
+        self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
 
         # We are good to go!
         self.set_mode(self.Mode.init)
-        rospy.loginfo(f"{rospy.get_name()}: Started")
+        self.get_logger().info(f"{self.get_name()}: Started")
 
     def set_mode(self, mode):
         self.mode_lock.acquire()
         self.mode = mode
         self.mode_lock.release()
-        rospy.loginfo(f"{rospy.get_name()}: Mode: {mode.name}")
-        self.mode_pub.publish(mode.name)
+        self.get_logger().info(f"{self.get_name()}: Mode: {mode.name}")
+        # Publish the mode
+        msg = String()
+        msg.data = mode.name
+        self.mode_pub.publish(msg)
 
     def goal_callback(self, data):
         # Check that goal is either "explore" or "go to robot"
@@ -278,8 +280,8 @@ class Navigator:
             self.explore_thread.start()
         else:
             # unknown transition. Die
-            rospy.logerr("Unknown transition from %s to %s", self.mode, data.action)
-            rospy.signal_shutdown("Shutting down navigator")
+            self.get_logger().error("Unknown transition from %s to %s", self.mode, data.action)
+            rclpy.shutdown()
 
     def pose_callback(self, data):
         self.uav_pose = data
@@ -291,7 +293,7 @@ class Navigator:
         x, y = utm.from_latlon(lat, lon)[0:2] - self.planner.origin
         pose = PoseStamped()
         pose.header.frame_id = "quad"
-        pose.header.stamp = rospy.Time.now()
+        pose.header.stamp = self.get_clock().now()
         pose.header.seq = self.uav_pose_seq
         self.uav_pose_seq += 1
         pose.pose.position.x = x
@@ -304,7 +306,7 @@ class Navigator:
             target = PointStamped()
             target.header.seq = self.uav_goal_seq
             self.uav_goal_seq += 1
-            target.header.stamp = rospy.Time.now()
+            target.header.stamp = self.get_clock().now()
             waypoint = self.planner.mission.waypoints[target_wpt]
             alt = self.planner.mission.altitude[target_wpt]
             target.point.x = waypoint[0]
@@ -315,8 +317,8 @@ class Navigator:
             # Call the mavros service to set the current waypoint
             try:
                 self.set_cur_wp(target_wpt)
-            except rospy.ServiceException as e:
-                rospy.logerr(f"Service call failed: {e}")
+            except Exception as e:
+                self.get_logger().error(f"Service call failed: {e}")
 
     def arrived_at_waypoint(self, waypoint):
         if self.uav_pose is not None:
@@ -324,11 +326,11 @@ class Navigator:
             curr = np.array(
                 [self.uav_pose.pose.position.x, self.uav_pose.pose.position.y]
             )
-            # rospy.loginfo(f"Current position: {curr}, target: {wp}")
+            # self.get_logger().info(f"Current position: {curr}, target: {wp}")
             if np.linalg.norm(curr - wp) < self.acceptance_radius:
                 return True
         else:
-            rospy.logwarn(f"{rospy.get_name()}: UAV pose not received yet")
+            self.get_logger().warn(f"{self.get_name()}: UAV pose not received yet")
         return False
 
     class ExplorationThread(threading.Thread):
@@ -339,9 +341,11 @@ class Navigator:
 
         def run(self):
             self.stop_event.clear()
-            rate = rospy.Rate(10)
-            # rospy.loginfo(f"{rospy.get_name()}: Exploration - Start")
-            while not rospy.is_shutdown() and not self.stop_event.is_set():
+            # rate = rospy.Rate(10)
+            # ROS2 equivalent of rospy.Rate(10)
+            rate = self.outer.create_rate(10)
+            # self.get_logger().info(f"{self.get_name()}: Exploration - Start")
+            while rclpy.ok() and not self.stop_event.is_set():
                 # Get the top element on the list as target waypoint
                 target = self.outer.explore_target_waypt[0]
                 # Send target waypoint to the UAV and check if we arrived. If we
@@ -359,12 +363,12 @@ class Navigator:
                 img = cv2.circle(img, tuple(target_px), 10, (0, 0, 255), 2)
                 self.outer.vis_pub.publish(cv_to_ros(img))
 
-                rospy.loginfo(
-                    f"{rospy.get_name()}: Exploration - Going to waypoint %s", target
+                self.get_logger().info(
+                    f"{self.get_name()}: Exploration - Going to waypoint %s", target
                 )
                 while (
                     not self.outer.arrived_at_waypoint(target)
-                    and not rospy.is_shutdown()
+                    and rclpy.ok()
                     and not self.stop_event.is_set()
                 ):
                     # Wait to arrive at the waypoint
@@ -385,13 +389,13 @@ class Navigator:
 
         def run(self):
             self.stop_event.clear()
-            rate = rospy.Rate(10)
+            rate = self.outer.create_rate(10)
 
-            # rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Start")
+            # self.get_logger().info(f"{self.get_name()}: GoToTarget - Start")
 
             # Wait until we have a valid robot pose
             while (
-                not rospy.is_shutdown()
+                rclpy.ok()
                 and not self.stop_event.is_set()
                 and self.outer.uav_pose is None
             ):
@@ -407,32 +411,32 @@ class Navigator:
                 [pos.x, pos.y], [robot_target.x, robot_target.y]
             )
             if route is None:
-                rospy.logerr(f"{rospy.get_name()}: GoToTarget - Could not find route.")
+                self.get_logger().error(f"{self.get_name()}: GoToTarget - Could not find route.")
                 return
 
             if len(route) == 0:
-                rospy.loginfo(
-                    f"{rospy.get_name()}: GoToTarget - Already at the target."
+                self.get_logger().info(
+                    f"{self.get_name()}: GoToTarget - Already at the target."
                 )
                 return
 
             # Check if we are already at the first waypoint
             if self.outer.arrived_at_waypoint(route[0]):
                 if len(route) == 1:
-                    rospy.loginfo(
-                        f"{rospy.get_name()}: GoToTarget - Already at the target."
+                    self.get_logger().info(
+                        f"{self.get_name()}: GoToTarget - Already at the target."
                     )
                     return
                 else:
                     route = route[1:]
 
-            rospy.loginfo(f"{rospy.get_name()}: GoToTarget - Route: {route}")
+            self.get_logger().info(f"{self.get_name()}: GoToTarget - Route: {route}")
 
-            while not rospy.is_shutdown() and not self.stop_event.is_set():
+            while rclpy.ok() and not self.stop_event.is_set():
                 # Get the top element of the route
                 target = route.pop(0)
-                rospy.loginfo(
-                    f"{rospy.get_name()}: GoToTarget - Going to waypoint %s", target
+                self.get_logger().info(
+                    f"{self.get_name()}: GoToTarget - Going to waypoint %s", target
                 )
                 # Send target waypoint to the UAV and check if we arrived. If we
                 # arrived, send the next waypoint
@@ -441,7 +445,7 @@ class Navigator:
                 decimator = 0
                 while (
                     not self.outer.arrived_at_waypoint(target)
-                    and not rospy.is_shutdown()
+                    and rclpy.ok()
                     and not self.stop_event.is_set()
                 ):
                     # Wait to arrive at the waypoint and publish images at 0.5
@@ -475,10 +479,22 @@ class Navigator:
                 # Check if we made it to the end
                 if len(route) == 0 and self.outer.arrived_at_waypoint(target):
                     self.outer.set_mode(self.outer.Mode.go_to_target_end)
-                    rospy.loginfo(f"{rospy.get_name()}: GoToTarget: reached goal")
+                    self.get_logger().info(f"{self.get_name()}: GoToTarget: reached goal")
                     return
 
 
-if __name__ == "__main__":
-    Navigator()
-    rospy.spin()
+def main(args=None):
+    rclpy.init(args=args)
+
+    nav_node = Navigator()
+
+    print(f"WP Radius: {nav_node.acceptance_radius}\n\tSpinning node...")
+
+    rclpy.spin(nav_node)
+
+    nav_node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

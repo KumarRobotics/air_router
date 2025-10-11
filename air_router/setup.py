@@ -24,8 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'test_node = air_router.test_node:main'
-            'navigator = air_router.test_node:main'
+            'test_node = air_router.test_node:main',
+            'navigator = air_router.navigator:main'
         ],
     },
 )
