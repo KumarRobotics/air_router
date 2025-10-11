@@ -158,9 +158,9 @@ class Navigator(Node):
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
         if self.sim:
-            self.create_subscription(PoseStamped, '/unity_ros/quadrotor/TrueState/pose', self.pose_callback, 1)
+            self.create_subscription(PoseStamped, 'unity_ros/quadrotor/TrueState/pose', self.pose_callback, 1)
         else:
-            self.create_subscription(NavSatFix, '/mavros/global_position/global', self.gps_callback, 1)
+            self.create_subscription(NavSatFix, 'mavros/global_position/global', self.gps_callback, 1)
 
         # Publish the goal for the UAV. For simulation, we will just publish a
         # goal, for the real world, we will use the mavros interface
@@ -173,7 +173,7 @@ class Navigator(Node):
 
         # Create subscribers _after loading services_ for the state machine
         # topics: goal and coordinates
-        self.create_subscription(Goal, '/air_router/goal', self.goal_callback, 1)
+        self.create_subscription(Goal, 'air_router/goal', self.goal_callback, 1)
 
         # Create the visualization topic to debug the navigator
         self.vis_pub = self.create_publisher(Image, 'air_router/navigator/viz', 1)
@@ -488,7 +488,7 @@ def main(args=None):
 
     nav_node = Navigator()
 
-    print(f"WP Radius: {nav_node.acceptance_radius}\n\tSpinning node...")
+    print(f"\tSpinning node...")
 
     rclpy.spin(nav_node)
 

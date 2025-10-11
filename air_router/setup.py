@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'test_node = air_router.test_node:main',
-            'navigator = air_router.navigator:main'
+            'navigator = air_router.navigator:main',
+            'goal_finder = air_router.goal_finder:main'
         ],
     },
 )
