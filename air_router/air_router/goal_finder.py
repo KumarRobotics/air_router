@@ -98,7 +98,10 @@ class GoalFinder(Node):
         # We did find a robot, go search for it
         # self.reset_timer()
         self.get_logger().warn(f"{self.get_name()}: Searching for \n{self.current_goal}")
-        self.goal_pub.publish(Goal("go to robot", self.current_goal))
+        new_goal = Goal()
+        new_goal.action = "go to robot"
+        new_goal.goal = self.current_goal
+        self.goal_pub.publish(new_goal)
 
     def update_goal(self, msg):
         self.current_goal = msg

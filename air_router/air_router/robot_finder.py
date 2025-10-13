@@ -190,48 +190,50 @@ class StateMachine(Node):
     def __init__(self):
         super().__init__("robot_finder")
 
+        self.declare_parameter('initial_exploration_time', DEFAULT_INITIAL_EXPLORATION_TIME)
+        self.declare_parameter('short_exploration_time', DEFAULT_SHORT_EXPLORATION_TIME)
+        self.declare_parameter('after_search_time', DEFAULT_AFTER_SEARCH_TIME)
+        self.declare_parameter('tracking_time', DEFAULT_TRACKING_TIME)
+        self.declare_parameter('alive_time', DEFAULT_ALIVE_TIME)
+        self.declare_parameter('recent_pose_time_threshold', 30)
+        self.declare_parameter('robot_list', "")
+
         # get parameters for the node
         if not self.has_parameter("initial_exploration_time"):
-            self.get_logger().warn(f"{self.get_name()}: Default" +
+            self.get_logger().warn(f"{self.get_name()}: Default " +
                           "initial_exploration_time")
-        self.declare_parameter('initial_exploration_time', DEFAULT_INITIAL_EXPLORATION_TIME)
         self.initial_expl_time = self.get_parameter('initial_exploration_time').get_parameter_value().integer_value
 
         self.get_logger().info(f"{self.get_name()}: initial_exploration_time: " +
                       f"{self.initial_expl_time}")
 
         if not self.has_parameter("short_exploration_time"):
-            self.get_logger().warn(f"{self.get_name()}: Default" +
+            self.get_logger().warn(f"{self.get_name()}: Default " +
                           "short_exploration_time")
-        self.declare_parameter('short_exploration_time', DEFAULT_SHORT_EXPLORATION_TIME)
         self.short_expl_time = self.get_parameter('short_exploration_time').get_parameter_value().integer_value
         self.get_logger().info(f"{self.get_name()}: short_exploration_time: " +
                       f"{self.short_expl_time}")
 
         if not self.has_parameter("after_search_time"):
             self.get_logger().warn(f"{self.get_name()}: Default after search_time")
-        self.declare_parameter('after_search_time', DEFAULT_AFTER_SEARCH_TIME)
         self.after_search_time = self.get_parameter('after_search_time').get_parameter_value().integer_value
         self.get_logger().info(f"{self.get_name()}: after_search_time: " +
                       f"{self.after_search_time}")
 
         if not self.has_parameter("tracking_time"):
             self.get_logger().warn(f"{self.get_name()}: Default tracking_time")
-        self.declare_parameter('tracking_time', DEFAULT_TRACKING_TIME)
         self.tracking_time = self.get_parameter('tracking_time').get_parameter_value().integer_value
         self.get_logger().info(f"{self.get_name()}: tracking_time: " +
                       f"{self.tracking_time}")
 
         if not self.has_parameter("alive_time"):
             self.get_logger().warn(f"{self.get_name()}: Default alive_time")
-        self.declare_parameter('alive_time', DEFAULT_ALIVE_TIME)
         self.alive_time = self.get_parameter('alive_time').get_parameter_value().integer_value
         self.get_logger().info(f"{self.get_name()}: alive_time: {self.alive_time}")
 
         if not self.has_parameter("recent_pose_time_threshold"):
-            self.get_logger().warn(f"{self.get_name()}: Default" +
+            self.get_logger().warn(f"{self.get_name()}: Default " +
                           "recent_pose_time_threshold")
-        self.declare_parameter('recent_pose_time_threshold', 30)
         self.recent_pose_time_threshold = self.get_parameter('recent_pose_time_threshold').get_parameter_value().integer_value
         self.get_logger().info(f"{self.get_name()}: recent_pose_time_threshold:" +
                       f"{self.recent_pose_time_threshold}")
@@ -250,7 +252,6 @@ class StateMachine(Node):
         self.state_sub = self.create_subscription(String, 'air_router/navigator/state', self.update_state, 1)
 
         # Robot list is a list of comma separated robots. Generate a list
-        self.declare_parameter('robot_list', "")
         rlist = self.get_parameter('robot_list').get_parameter_value().string_value.split(",")
         rlist = [r.strip() for r in rlist]
         assert len(rlist) > 0
@@ -352,7 +353,10 @@ class StateMachine(Node):
         self.set_state(self.State.exploration_initial)
         # Go explore
         self.set_timer(self.initial_expl_time)
-        self.goal_pub.publish(Goal("explore", None))
+        new_goal = Goal()
+        new_goal.action = "explore"
+        new_goal.goal = None
+        self.goal_pub.publish(new_goal)
         self.get_logger().info(f"{self.get_name()}: Initial Expl - Starting")
 
     def state_exploration_short(self):
@@ -360,7 +364,10 @@ class StateMachine(Node):
         # First, cancel the timer
         self.reset_timer()
         # Go explore
-        self.goal_pub.publish(Goal("explore", None))
+        new_goal = Goal()
+        new_goal.action = "explore"
+        new_goal.goal = None
+        self.goal_pub.publish(new_goal)
         self.get_logger().info(f"{self.get_name()}: Short Expl - Starting")
         # Timer will be manually started once we resume exploration
 
@@ -371,7 +378,10 @@ class StateMachine(Node):
         self.get_logger().warn(f"{self.get_name()}: Search - " +
                       f"finding target {self.robot_target.agent_name}")
         self.robot_target.set_node_search_state(True)
-        self.goal_pub.publish(Goal("go to robot", self.robot_position_target))
+        new_goal = Goal()
+        new_goal.action = "go to robot"
+        new_goal.goal = self.robot_position_target
+        self.goal_pub.publish(new_goal)
 
     def state_wait_after_search(self):
         self.set_state(self.State.wait_search)
@@ -387,7 +397,10 @@ class StateMachine(Node):
             self.set_timer(self.tracking_time)
         self.set_state(self.State.tracking)
         self.robot_position_target = self.robot_target.where_to_find_me()
-        self.goal_pub.publish(Goal("go to robot", self.robot_position_target))
+        new_goal = Goal()
+        new_goal.action = "go to robot"
+        new_goal.goal = self.robot_position_target
+        self.goal_pub.publish(new_goal)
         self.get_logger().info(f"{self.get_name()}: Search - Updated Tracking")
 
     def update_state(self, msg):
