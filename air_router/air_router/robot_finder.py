@@ -355,7 +355,7 @@ class StateMachine(Node):
         self.set_timer(self.initial_expl_time)
         new_goal = Goal()
         new_goal.action = "explore"
-        new_goal.goal = None
+        new_goal.goal = PointStamped()
         self.goal_pub.publish(new_goal)
         self.get_logger().info(f"{self.get_name()}: Initial Expl - Starting")
 
@@ -366,7 +366,7 @@ class StateMachine(Node):
         # Go explore
         new_goal = Goal()
         new_goal.action = "explore"
-        new_goal.goal = None
+        new_goal.goal = PointStamped()
         self.goal_pub.publish(new_goal)
         self.get_logger().info(f"{self.get_name()}: Short Expl - Starting")
         # Timer will be manually started once we resume exploration
