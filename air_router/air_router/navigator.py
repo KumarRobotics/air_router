@@ -143,10 +143,6 @@ class Navigator(Node):
         # UAV pose keeps the pose of the UAV in standard coordinates:
         self.uav_pose = None
 
-        # Counters for ROS msgs
-        self.uav_goal_seq = 0
-        self.uav_pose_seq = 0
-
         # Target goal for the UAV in GoToTarget mode
         self.robot_target = None
 
@@ -294,8 +290,6 @@ class Navigator(Node):
         pose = PoseStamped()
         pose.header.frame_id = "quad"
         pose.header.stamp = self.get_clock().now()
-        pose.header.seq = self.uav_pose_seq
-        self.uav_pose_seq += 1
         pose.pose.position.x = x
         pose.pose.position.y = y
         self.uav_pose = pose
@@ -304,8 +298,6 @@ class Navigator(Node):
         # For simulation purposes, we will publish the target waypoint
         if self.sim:
             target = PointStamped()
-            target.header.seq = self.uav_goal_seq
-            self.uav_goal_seq += 1
             target.header.stamp = self.get_clock().now()
             waypoint = self.planner.mission.waypoints[target_wpt]
             alt = self.planner.mission.altitude[target_wpt]
