@@ -26,7 +26,8 @@ setup(
         'console_scripts': [
             'test_node = air_router.test_node:main',
             'navigator = air_router.navigator:main',
-            'goal_finder = air_router.goal_finder:main'
+            'goal_finder = air_router.goal_finder:main',
+            'robot_finder = air_router.robot_finder:main'
         ],
     },
 )
