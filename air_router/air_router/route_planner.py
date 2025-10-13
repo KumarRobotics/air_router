@@ -82,9 +82,15 @@ class Mission():
             self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
                           if not i["inclusion"]]
             self.rally = None
-            self.waypoints = {w: [yml["waypoints"][w][0], yml["waypoints"][w][1]]
-                              for w in yml["waypoints"]}
-            self.altitude = {w: yml["waypoints"][w][2] for w in yml["waypoints"]}
+            # self.waypoints = {w: [yml["waypoints"][w][0], yml["waypoints"][w][1]]
+            #                   for w in yml["waypoints"]}
+            self.waypoints = {i: d["params"][4:6]
+                              for i, d in enumerate(yml["mission"]["items"])
+                              if d["command"] == 16}
+            # self.altitude = {w: yml["waypoints"][w][2] for w in yml["waypoints"]}
+            self.altitude = {i: d["AMSLAltAboveTerrain"]
+                              for i, d in enumerate(yml["mission"]["items"])
+                              if d["command"] == 16}
             self.fence = yml["geoFence"]["polygons"][0]
             if not self.fence["inclusion"]:
                 sys.exit("Error: the geoFence is not an inclusion zone")
