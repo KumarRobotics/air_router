@@ -29,8 +29,6 @@ class TestGF(Node):
         super().__init__('test_goal_finder')
     
     def run_test(self):
-        self.declare_parameter('map_name', "")
-        map_name = self.get_parameter('map_name').get_parameter_value().string_value
         self.declare_parameter('max_edge_length', 100)
         max_edge_length = self.get_parameter('max_edge_length').get_parameter_value().integer_value
 

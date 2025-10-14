@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from router_interfaces.msg import Goal
 import sys
+import random
+import yaml
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 import os
@@ -8,10 +10,12 @@ import importlib
 import pdb
 import numpy as np
 import argparse
-import rospkg
-import route_planner
 
 from air_router import route_planner
+
+import rclpy
+from rclpy.node import Node
+from rclpy.clock import Clock
 
 
 DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
@@ -23,6 +27,10 @@ class TestNav(Node):
         super().__init__('test_navigator')
 
     def run_test(self):
+        # get map_name from the params
+        self.declare_parameter('max_edge_length', 100)
+        max_edge_length = self.get_parameter('max_edge_length').get_parameter_value().integer_value
+
         # Import mission and get waypoints
         self.declare_parameter('world_config_path', DEFAULT_WORLD_PATH)
         world_config_path = self.get_parameter('world_config_path').get_parameter_value().string_value
@@ -32,7 +40,7 @@ class TestNav(Node):
         path = os.path.dirname(world_config_path)
         my_map = os.path.join(path, world_config["map"])
 
-        p = route_planner.Path_planner(map_path)
+        p = route_planner.Path_planner(my_map, max_edge_length)
         wp = p.mission.waypoints
 
         # Create publisher for /unity_ros/quadrotor/Truestate/pose

@@ -32,7 +32,8 @@ setup(
             'goal_finder = air_router.goal_finder:main',
             'robot_finder = air_router.robot_finder:main',
             'test_goal_finder = air_router.test_goal_finder:main',
-            'test_navigator = air_router.navigator:main'
+            'test_navigator = air_router.test_navigator:main',
+            'test_robot_finder = air_router.test_robot_finder:main'
         ],
     },
 )
