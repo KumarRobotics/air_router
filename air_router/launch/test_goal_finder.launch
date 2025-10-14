@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+
+  <arg name="output" default="screen"/>
+
+  <arg name="acceptance_radius" default="2"/>
+  <arg name="sim" default="true"/>
+  <arg name="max_edge_length" default="101" />
+  <arg name="robot_list" default="io,callisto"/>
+  <!-- <arg name="world_config_path" default="$(find-pkg-share semantics_manager)/config/config_sim.yaml"/> -->
+  <arg name="world_config_path" default="/home/jonathan/temp/config.yaml"/>
+  
+
+  <!-- ==================== LAUNCH NODES ================== -->
+  
+  <node pkg="air_router" exec="navigator" name="navigator" output="$(var output)">
+    <param name="acceptance_radius" value="$(var acceptance_radius)" />
+    <param name="sim" value="$(var sim)" />
+    <param name="world_config_path" value="$(var world_config_path)" />
+    <param name="max_edge_length" value="$(var max_edge_length)" />
+  </node>
+
+  <node pkg="air_router" exec="goal_finder" name="goal_finder" output="$(var output)">
+    <!-- <param name="use_zmq" value="True"/> -->
+  </node>
+
+  <!-- Load the test node -->
+  <node pkg="air_router" exec="test_goal_finder" name="test_goal_finder" output="$(var output)">
+    <param name="world_config_path" value="$(var world_config_path)" />
+    <param name="max_edge_length" value="$(var max_edge_length)" />
+  </node>
+
+</launch>
