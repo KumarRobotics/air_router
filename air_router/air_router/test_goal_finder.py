@@ -24,7 +24,7 @@ from air_router import route_planner
 DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
 
 
-class Test(Node):
+class TestGF(Node):
     def __init__(self):
         super().__init__('test_goal_finder')
     
@@ -35,19 +35,10 @@ class Test(Node):
         max_edge_length = self.get_parameter('max_edge_length').get_parameter_value().integer_value
 
         # Get map config
-
-        # rospack = rospkg.RosPack()
-        # semantics_path = rospack.get_path("semantics_manager")
-        # semantics_path = get_package_share_directory('semantics_manager')
-        # map_path = os.path.join(semantics_path, "maps", map_name, "map_config.yaml")
-
-        # # Import mission and get waypoints
-        # air_router_path = os.path.join(get_package_share_directory('air_router'), "scripts")
-        # sys.path.append(air_router_path)
-        
         self.declare_parameter('world_config_path', DEFAULT_WORLD_PATH)
         world_config_path = self.get_parameter('world_config_path').get_parameter_value().string_value
 
+        # Import mission and get waypoints
         with open(world_config_path, "r") as f:
             world_config = yaml.safe_load(f)
         path = os.path.dirname(world_config_path)
@@ -133,7 +124,7 @@ class Test(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    test_node = Test()
+    test_node = TestGF()
 
     print(f"Running goal_finder test")
     test_node.run_test()
