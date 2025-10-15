@@ -21,7 +21,7 @@ from ament_index_python.packages import get_package_share_directory
 from air_router import route_planner
 
 
-DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
+DEFAULT_WORLD_PATH = "/home/jonathan/temp/pennovation/config.yaml"
 
 
 class TestGF(Node):

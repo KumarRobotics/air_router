@@ -30,7 +30,7 @@ creates a plan for performing the action using the router.
 # Default acceptance radius for the UAV in meters
 DEFAULT_ACCEPTANCE_RADIUS = 3
 DEFAULT_MAX_EDGE_LENGTH = 100
-DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
+DEFAULT_WORLD_PATH = "/home/jonathan/temp/pennovation/config.yaml"
 
 
 def cv_to_ros(img):

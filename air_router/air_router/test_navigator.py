@@ -18,7 +18,7 @@ from rclpy.node import Node
 from rclpy.clock import Clock
 
 
-DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
+DEFAULT_WORLD_PATH = "/home/jonathan/temp/pennovation/config.yaml"
 
 
 
@@ -118,7 +118,7 @@ class TestNav(Node):
         pose.header.stamp = Clock().now().to_msg()
         pose.pose.position.x = coord[0]
         pose.pose.position.y = coord[1]
-        pose.pose.position.z = 60
+        pose.pose.position.z = 60.0
         return pose
 
 

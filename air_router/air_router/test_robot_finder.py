@@ -18,7 +18,7 @@ from rclpy.clock import Clock
 from air_router import route_planner
 
 
-DEFAULT_WORLD_PATH = "/home/jonathan/temp/config.yaml"
+DEFAULT_WORLD_PATH = "/home/jonathan/temp/pennovation/config.yaml"
 
 
 
@@ -216,7 +216,7 @@ class TestNav(Node):
 
 
     def publish_waypoint(self, w):
-        print_test_message(f"Publishing Titan pose {w}")
+        self.print_test_message(f"Publishing Titan pose {w}")
         if not rclpy.ok():
             sys.exit(0)
         self.pose_pub.publish(self.create_pose_msg(wp[w]))

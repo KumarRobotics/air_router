@@ -13,7 +13,7 @@
   <arg name="max_edge_length" default="101" />
   <arg name="robot_list" default="io,callisto"/>
   <!-- <arg name="world_config_path" default="$(find-pkg-share semantics_manager)/config/config_sim.yaml"/> -->
-  <arg name="world_config_path" default="/home/jonathan/temp/config.yaml"/>
+  <arg name="world_config_path" default="/home/jonathan/temp/pennovation/config.yaml"/>
   
 
   <!-- ==================== LAUNCH NODES ================== -->

@@ -8,7 +8,7 @@
 
   <!-- Map configuration -->
   <!-- <arg name="world_config_path" default="$(find-pkg-share semantics_manager)/config/config_sim.yaml"/> -->
-  <arg name="world_config_path" default="/home/jonathan/temp/config.yaml"/>
+  <arg name="world_config_path" default="/home/jonathan/temp/pennovation/config.yaml"/>
 
   <!-- Use sim -->
   <arg name="sim" default="true"/>
