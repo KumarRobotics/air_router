@@ -1,0 +1,12 @@
+dynamic: True
+resolution: 2
+# pennovation
+gps_origin_lat: 39.941361
+gps_origin_long: -75.199691
+# Quad planning. These are not used by asoom, only for the quad mission
+color: ../pennovation2/pennovation2_color.png
+img_resolution: 5.07
+image_origin_px_x: 1097
+image_origin_px_y: 1073
+quad_plan: quad_plan.plan
+quad_plan_format: QGC
