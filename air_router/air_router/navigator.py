@@ -125,7 +125,8 @@ class Navigator(Node):
         rclpy.node.get_logger("here").info("Direct info print call")
 
         # Create a path planner object
-        self.planner = route_planner.Path_planner(self.map, self.max_edge_length)
+        self.planner = route_planner.Path_planner(self.map,
+                                                  self.max_edge_length, self)
 
         # Initially, the navigator is in the init mode. We will wait for an
         # order from the state machine
