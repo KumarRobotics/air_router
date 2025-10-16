@@ -42,7 +42,7 @@ class TestNav(Node):
 
         # Import mission and get waypoints
         p = route_planner.Path_planner(my_map, max_edge_length)
-        wp = p.mission.waypoints
+        self.wp = p.mission.waypoints
 
         # Create publisher for /unity_ros/quadrotor/Truestate/pose
         self.pose_pub = self.create_publisher(PoseStamped, 'unity_ros/quadrotor/TrueState/pose', 1)
@@ -61,7 +61,7 @@ class TestNav(Node):
         self.print_test_message("Starting test integration")
 
         # Send initial explore command
-        curr_wp_expl = min(wp.keys())
+        curr_wp_expl = min(self.wp.keys())
         self.print_test_message(f"Publishing first pose")
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
         self.publish_waypoint(curr_wp_expl)
@@ -92,7 +92,7 @@ class TestNav(Node):
 
         # Publish a robot pose
         self.print_test_message("Publishing callisto pose")
-        callisto_pose_pub.publish(self.create_robot_pose(wp[2]))
+        callisto_pose_pub.publish(self.create_robot_pose(self.wp[2]))
         self.print_test_message("Time out into search mode")
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=3.0))
         self.print_test_message("Going to callisto pose")
@@ -121,7 +121,7 @@ class TestNav(Node):
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
         self.print_test_message(f"Publishing callisto pose. Nothing should " +
                         "happen as we are searching the basestation")
-        callisto_pose_pub.publish(self.create_robot_pose(wp[5]))
+        callisto_pose_pub.publish(self.create_robot_pose(self.wp[5]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
         self.publish_waypoint(6)
         self.publish_waypoint(2)
@@ -130,7 +130,7 @@ class TestNav(Node):
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
         self.print_test_message("Going back to exploration. Publish Io pose.")
         self.publish_waypoint(6)
-        io_pose_pub.publish(self.create_robot_pose(wp[10]))
+        io_pose_pub.publish(self.create_robot_pose(self.wp[10]))
         self.publish_waypoint(7)
         self.publish_waypoint(14)
         self.publish_waypoint(13)
@@ -155,16 +155,16 @@ class TestNav(Node):
         # Search for callisto, chasing it
         self.print_test_message("Chase callisto, first target after exploration")
         self.publish_waypoint(27)
-        callisto_pose_pub.publish(self.create_robot_pose(wp[20]))
+        callisto_pose_pub.publish(self.create_robot_pose(self.wp[20]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=0.3))
         self.publish_waypoint(3)
-        callisto_pose_pub.publish(self.create_robot_pose(wp[20]))
+        callisto_pose_pub.publish(self.create_robot_pose(self.wp[20]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=0.3))
         self.publish_waypoint(27)
-        callisto_pose_pub.publish(self.create_robot_pose(wp[20]))
+        callisto_pose_pub.publish(self.create_robot_pose(self.wp[20]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=0.3))
         self.publish_waypoint(25)
-        callisto_pose_pub.publish(self.create_robot_pose(wp[20]))
+        callisto_pose_pub.publish(self.create_robot_pose(self.wp[20]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=0.3))
         self.publish_waypoint(24)
         self.print_test_message("Timeout")
@@ -177,13 +177,13 @@ class TestNav(Node):
         self.publish_waypoint(20)
         self.publish_waypoint(17)
         self.print_test_message("Change io pose")
-        io_pose_pub.publish(self.create_robot_pose(wp[20]))
+        io_pose_pub.publish(self.create_robot_pose(self.wp[20]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
         self.print_test_message("Go to the new io position")
         self.publish_waypoint(7)
         for i in range(2, 13):
             self.print_test_message("Change io pose")
-            io_pose_pub.publish(self.create_robot_pose(wp[i]))
+            io_pose_pub.publish(self.create_robot_pose(self.wp[i]))
             self.get_clock().sleep_for(rclpy.duration.Duration(seconds=1.0))
         self.print_test_message("Sync complete io. Should do nothing as we already timed out.")
         io_ddb_sync.publish()
@@ -219,7 +219,7 @@ class TestNav(Node):
         self.print_test_message(f"Publishing Titan pose {w}")
         if not rclpy.ok():
             sys.exit(0)
-        self.pose_pub.publish(self.create_pose_msg(wp[w]))
+        self.pose_pub.publish(self.create_pose_msg(self.wp[w]))
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=0.2))
 
 

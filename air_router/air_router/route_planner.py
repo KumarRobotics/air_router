@@ -283,9 +283,11 @@ class Path_planner():
             # shutdown node otherwise
             if len(points[i]["neigh"]) == 0:
                 rclpy.node.get_logger("route_planner").error("No route to waypoint {}".format(i))
-                # rospy.signal_shutdown("No route to waypoint {}".format(i))
-                # return
-                rclpy.shutdown()
+                if rclpy.ok():
+                    rclpy.shutdown()
+                else:
+                    sys.exit()
+                
 
         # Fill the neighbor distances
         for i in points:
