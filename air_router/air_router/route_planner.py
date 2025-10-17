@@ -39,6 +39,9 @@ class Mission():
             assert len(self.origin) == 2
             assert isinstance(self.origin, np.ndarray)
 
+            self.origin_utm = np.array(utm.from_latlon(origin[0],
+                                                       origin[1])[:2])
+
             # Check that the file is a valid QGC mission file
             if (yml['fileType'] != "Plan" or
                     yml['version'] != 1 or
@@ -50,10 +53,10 @@ class Mission():
             for m in mission:
                 if m["params"][4] is not None and m["params"][5] is not None:
                     m["params"][4:6] = utm.from_latlon(m["params"][4],
-                                                       m["params"][5])[:2] - self.origin
+                                                       m["params"][5])[:2] - self.origin_utm
 
             # Get rally points in utm
-            self.rally = [utm.from_latlon(x, y)[:2] - self.origin
+            self.rally = [utm.from_latlon(x, y)[:2] - self.origin_utm
                           for [x, y, _] in
                           yml["rallyPoints"]["points"]]
 
@@ -67,7 +70,7 @@ class Mission():
             # Get fence in UTM
             self.fence = yml["geoFence"]["polygons"][0]
             for p in self.fence["polygon"]:
-                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin
+                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin_utm
             if not self.fence["inclusion"]:
                 sys.exit("Error: the geoFence is not an inclusion zone")
 
@@ -77,7 +80,7 @@ class Mission():
                           if not i["inclusion"]]
             for nf in self.noFly:
                 for p in nf:
-                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin
+                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin_utm
         elif mission_file_format == "Sim":
             self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
                           if not i["inclusion"]]
@@ -173,9 +176,8 @@ class Path_planner():
         if map_yaml["quad_plan_format"] == "Sim":
             self.mission = Mission(mission_file, mission_file_format)
         elif map_yaml["quad_plan_format"] == "QGC":
-            origin = utm.from_latlon(map_yaml["gps_origin_lat"],
-                                     map_yaml["gps_origin_long"])[:2]
-            self.origin = np.array(origin)
+            self.origin = np.array([float(map_yaml["gps_origin_lat"]),
+                                   float(map_yaml["gps_origin_long"])])
             self.mission = Mission(mission_file, map_yaml["quad_plan_format"],
                                    self.origin)
         else:

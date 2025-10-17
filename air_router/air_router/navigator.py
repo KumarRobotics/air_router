@@ -287,7 +287,8 @@ class Navigator(Node):
         # Convert the GPS coordinates to the map frame
         lat = data.latitude
         lon = data.longitude
-        x, y = utm.from_latlon(lat, lon)[0:2] - self.planner.origin
+        x, y = np.array(utm.from_latlon(lat, lon)[:2]) -
+            np.array(utm.from_latlon(self.planner.origin)[:2])
         pose = PoseStamped()
         pose.header.frame_id = "quad"
         pose.header.stamp = self.get_clock().now()
