@@ -7,11 +7,10 @@
   <arg name="run_robot_finder" default="true" />
 
   <!-- Map configuration -->
-  <!-- <arg name="world_config_path" default="$(find-pkg-share semantics_manager)/config/config_sim.yaml"/> -->
-  <arg name="world_config_path" default="/home/jonathan/temp/pennovation/config.yaml"/>
+  <arg name="config_path" default="$(find-pkg-share air_router)/maps/pennovation_map_config.yaml"/>
 
   <!-- Use sim -->
-  <arg name="sim" default="true"/>
+  <arg name="sim" default="false"/>
 
   <!-- Navigator parameters -->
   <arg name="recent_pose_time_threshold" default="120"/>
@@ -33,7 +32,7 @@
   <node pkg="air_router" exec="navigator" name="navigator" output="$(var output)">
     <param name="acceptance_radius" value="$(var acceptance_radius)" />
     <param name="sim" value="$(var sim)" />
-    <param name="world_config_path" value="$(var world_config_path)" />
+    <param name="config_path" value="$(var config_path)" />
     <param name="max_edge_length" value="$(var max_edge_length)" />
   </node>
 

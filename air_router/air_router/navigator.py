@@ -30,7 +30,6 @@ creates a plan for performing the action using the router.
 # Default acceptance radius for the UAV in meters
 DEFAULT_ACCEPTANCE_RADIUS = 3
 DEFAULT_MAX_EDGE_LENGTH = 100
-DEFAULT_WORLD_PATH = "/home/jonathan/temp/pennovation/config.yaml"
 
 
 def cv_to_ros(img):
@@ -65,8 +64,8 @@ class Navigator(Node):
         # Declare parameters
         self.declare_parameter('acceptance_radius', DEFAULT_ACCEPTANCE_RADIUS)
         self.declare_parameter('sim', True)
-        self.declare_parameter('world_config_path', DEFAULT_WORLD_PATH)
         self.declare_parameter('max_edge_length', DEFAULT_MAX_EDGE_LENGTH)
+        self.declare_parameter('config_path', value="PARAMETER NOT SET")
 
         # Get the acceptance radius for the UAV, which should be an integer
         # between 1 and 20
@@ -86,17 +85,6 @@ class Navigator(Node):
         # Are we in simulator mode?
         self.sim = self.get_parameter('sim').get_parameter_value().bool_value
         
-        self.world_config_path = self.get_parameter('world_config_path').get_parameter_value().string_value
-        self.get_logger().info(
-            f"{self.get_name()}: World config path: {self.world_config_path}"
-        )
-
-        # Get the base path from the world_config_path
-        path = os.path.dirname(self.world_config_path)
-        with open(self.world_config_path, "r") as f:
-            world_config = yaml.safe_load(f)
-        self.map = os.path.join(path, world_config["map"])
-
         # Get the edge length for route planner
         self.max_edge_length = self.get_parameter('max_edge_length').get_parameter_value().integer_value
         if (
@@ -112,12 +100,13 @@ class Navigator(Node):
             return
 
         # Does the map config file exist?
-        if not os.path.exists(self.map):
-            self.get_logger().error(f"{self.get_name()}: Map config file does not exist")
+        self.config_file = self.get_parameter('config_path').get_parameter_value().string_value
+        if not os.path.exists(self.config_file):
+            self.get_logger().error(f"Map config file does not exist")
             rclpy.shutdown()
             return
         assert isinstance(self.sim, bool)
-        self.get_logger().info(f"{self.get_name()}: Map: {self.map}")
+        self.get_logger().info(f"{self.get_name()}: Config File: {self.config_file}")
         self.get_logger().info(f"{self.get_name()}: Max edge length: {self.max_edge_length}")
         self.get_logger().info(f"{self.get_name()}: Sim: {self.sim}")
         self.get_logger().info(f"{self.get_name()}: AR: {self.acceptance_radius}")
@@ -125,7 +114,7 @@ class Navigator(Node):
         rclpy.node.get_logger("here").info("Direct info print call")
 
         # Create a path planner object
-        self.planner = route_planner.Path_planner(self.map,
+        self.planner = route_planner.Path_planner(self.config_file,
                                                   self.max_edge_length, self)
 
         # Initially, the navigator is in the init mode. We will wait for an
@@ -287,8 +276,7 @@ class Navigator(Node):
         # Convert the GPS coordinates to the map frame
         lat = data.latitude
         lon = data.longitude
-        x, y = np.array(utm.from_latlon(lat, lon)[:2]) -
-            np.array(utm.from_latlon(self.planner.origin)[:2])
+        x, y = np.array(utm.from_latlon(lat, lon)[:2]) - np.array(utm.from_latlon(self.planner.origin)[:2])
         pose = PoseStamped()
         pose.header.frame_id = "quad"
         pose.header.stamp = self.get_clock().now()

@@ -7,8 +7,7 @@
   <arg name="sim" default="true"/>
   <arg name="max_edge_length" default="101" />
   <arg name="robot_list" default="io,callisto"/>
-  <!-- <arg name="world_config_path" default="$(find-pkg-share semantics_manager)/config/config_sim.yaml"/> -->
-  <arg name="world_config_path" default="/home/jonathan/temp/pennovation/config.yaml"/>
+  <arg name="config_path" default="$(find-pkg-share air_router)/maps/pennovation_map_config.yaml"/>
   
 
   <!-- ==================== LAUNCH NODES ================== -->
@@ -16,7 +15,7 @@
   <node pkg="air_router" exec="navigator" name="navigator" output="$(var output)">
     <param name="acceptance_radius" value="$(var acceptance_radius)" />
     <param name="sim" value="$(var sim)" />
-    <param name="world_config_path" value="$(var world_config_path)" />
+    <param name="config_path" value="$(var config_path)" />
     <param name="max_edge_length" value="$(var max_edge_length)" />
   </node>
 
@@ -26,7 +25,7 @@
 
   <!-- Load the test node -->
   <node pkg="air_router" exec="test_goal_finder" name="test_goal_finder" output="$(var output)">
-    <param name="world_config_path" value="$(var world_config_path)" />
+    <param name="config_path" value="$(var config_path)" />
     <param name="max_edge_length" value="$(var max_edge_length)" />
   </node>
 

@@ -18,7 +18,6 @@ from rclpy.clock import Clock
 from air_router import route_planner
 
 
-DEFAULT_WORLD_PATH = "/home/jonathan/temp/pennovation/config.yaml"
 
 
 
@@ -30,18 +29,16 @@ class TestNav(Node):
         # get map_name from the params
         self.declare_parameter('max_edge_length', 100)
         max_edge_length = self.get_parameter('max_edge_length').get_parameter_value().integer_value
+        
+        self.declare_parameter('config_path', value="PARAMETER NOT SET")
+        config_path = self.get_parameter('config_path').get_parameter_value().string_value
+        if not os.path.exists(config_path):
+            self.get_logger().error(f"Map config file does not exist")
+            rclpy.shutdown()
+            return
 
         # Import mission and get waypoints
-        self.declare_parameter('world_config_path', DEFAULT_WORLD_PATH)
-        world_config_path = self.get_parameter('world_config_path').get_parameter_value().string_value
-
-        with open(world_config_path, "r") as f:
-            world_config = yaml.safe_load(f)
-        path = os.path.dirname(world_config_path)
-        my_map = os.path.join(path, world_config["map"])
-
-        # Import mission and get waypoints
-        p = route_planner.Path_planner(my_map, max_edge_length)
+        p = route_planner.Path_planner(config_path, max_edge_length)
         self.wp = p.mission.waypoints
 
         # Create publisher for /unity_ros/quadrotor/Truestate/pose
