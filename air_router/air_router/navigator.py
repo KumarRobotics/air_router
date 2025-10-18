@@ -111,8 +111,6 @@ class Navigator(Node):
         self.get_logger().info(f"{self.get_name()}: Sim: {self.sim}")
         self.get_logger().info(f"{self.get_name()}: AR: {self.acceptance_radius}")
 
-        rclpy.node.get_logger("here").info("Direct info print call")
-
         # Create a path planner object
         self.planner = route_planner.Path_planner(self.config_file,
                                                   self.max_edge_length, self)
@@ -279,21 +277,22 @@ class Navigator(Node):
         x, y = np.array(utm.from_latlon(lat, lon)[:2]) - np.array(utm.from_latlon(self.planner.origin)[:2])
         pose = PoseStamped()
         pose.header.frame_id = "quad"
-        pose.header.stamp = self.get_clock().now()
+        pose.header.stamp = self.get_clock().now().to_msg()
         pose.pose.position.x = x
         pose.pose.position.y = y
         self.uav_pose = pose
 
     def send_waypoint_uav(self, target_wpt):
+        self.get_logger().info(f"Asked to move to wp {target_wpt}")
         # For simulation purposes, we will publish the target waypoint
         if self.sim:
             target = PointStamped()
-            target.header.stamp = self.get_clock().now()
+            target.header.stamp = self.get_clock().now().to_msg()
             waypoint = self.planner.mission.waypoints[target_wpt]
             alt = self.planner.mission.altitude[target_wpt]
-            target.point.x = waypoint[0]
-            target.point.y = waypoint[1]
-            target.point.z = alt
+            target.point.x = float(waypoint[0])
+            target.point.y = float(waypoint[1])
+            target.point.z = float(alt)
             self.uav_goal.publish(target)
         else:
             # Call the mavros service to set the current waypoint
