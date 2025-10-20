@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+  <!-- ==================== PARAMETERS ==================== -->
+  <arg name="output" default="screen"/>
+  <arg name="run_robot_finder" default="True" />
+
+  <!-- Map configuration -->
+  <arg name="config_path" default="$(find-pkg-share air_router)/maps/sim_map_config.yaml"/>
+
+  <!-- Use sim -->
+  <arg name="sim" default="True"/>
+
+  <!-- Navigator parameters -->
+  <arg name="recent_pose_time_threshold" default="120"/>
+  <arg name="acceptance_radius" default="6"/>
+  <arg name="max_edge_length" default="100" />
+
+  <!-- Robot_finder parameters -->
+  <arg name="initial_expl_time" default="300"/>
+  <arg name="short_expl_time" default="120"/>
+  <arg name="after_search_time" default="15"/>
+  <arg name="tracking_time" default="60"/>
+  <arg name="robot_list" default="io,callisto,europa"/>
+
+  <!-- Goal_finder parameters -->
+  <arg name="use_zmq" default="False" />
+
+  <!-- ==================== LAUNCH NODES ================== -->
+  
+  <node pkg="air_router" exec="navigator" name="navigator" output="$(var output)">
+    <param name="acceptance_radius" value="$(var acceptance_radius)" />
+    <param name="sim" value="$(var sim)" />
+    <param name="config_path" value="$(var config_path)" />
+    <param name="max_edge_length" value="$(var max_edge_length)" />
+  </node>
+
+  <node pkg="image_transport" exec="republish" name="republish"
+    args="raw in:=/air_router/navigator/viz compressed out:=/air_router/navigator/viz">
+  </node>
+
+  <group if="$(var run_robot_finder)">
+    <node pkg="air_router" exec="robot_finder" name="robot_finder" output="$(var output)">
+      <param name="initial_exploration_time" value="$(var initial_expl_time)"/>
+      <param name="short_exploration_time" value="$(var short_expl_time)"/>
+      <param name="after_search_time" value="$(var after_search_time)"/>
+      <param name="recent_pose_time_threshold" value="$(var recent_pose_time_threshold)"/>
+      <param name="robot_list" value="$(var robot_list)"/>
+    </node>
+  </group>
+  <group unless="$(var run_robot_finder)">
+    <node pkg="air_router" exec="goal_finder" name="goal_finder" output="$(var output)">
+      <param name="use_zmq" value="True"/>
+    </node>
+  </group>
+
+</launch>

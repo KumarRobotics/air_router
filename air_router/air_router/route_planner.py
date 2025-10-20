@@ -11,7 +11,8 @@ import threading
 
 import cv2
 import numpy as np
-import rospy
+# import rospy
+import rclpy
 import utm
 import yaml
 
@@ -38,6 +39,9 @@ class Mission():
             assert len(self.origin) == 2
             assert isinstance(self.origin, np.ndarray)
 
+            self.origin_utm = np.array(utm.from_latlon(origin[0],
+                                                       origin[1])[:2])
+
             # Check that the file is a valid QGC mission file
             if (yml['fileType'] != "Plan" or
                     yml['version'] != 1 or
@@ -49,10 +53,10 @@ class Mission():
             for m in mission:
                 if m["params"][4] is not None and m["params"][5] is not None:
                     m["params"][4:6] = utm.from_latlon(m["params"][4],
-                                                       m["params"][5])[:2] - self.origin
+                                                       m["params"][5])[:2] - self.origin_utm
 
             # Get rally points in utm
-            self.rally = [utm.from_latlon(x, y)[:2] - self.origin
+            self.rally = [utm.from_latlon(x, y)[:2] - self.origin_utm
                           for [x, y, _] in
                           yml["rallyPoints"]["points"]]
 
@@ -66,7 +70,7 @@ class Mission():
             # Get fence in UTM
             self.fence = yml["geoFence"]["polygons"][0]
             for p in self.fence["polygon"]:
-                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin
+                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin_utm
             if not self.fence["inclusion"]:
                 sys.exit("Error: the geoFence is not an inclusion zone")
 
@@ -76,14 +80,20 @@ class Mission():
                           if not i["inclusion"]]
             for nf in self.noFly:
                 for p in nf:
-                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin
+                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin_utm
         elif mission_file_format == "Sim":
             self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
                           if not i["inclusion"]]
             self.rally = None
-            self.waypoints = {w: [yml["waypoints"][w][0], yml["waypoints"][w][1]]
-                              for w in yml["waypoints"]}
-            self.altitude = {w: yml["waypoints"][w][2] for w in yml["waypoints"]}
+            # self.waypoints = {w: [yml["waypoints"][w][0], yml["waypoints"][w][1]]
+            #                   for w in yml["waypoints"]}
+            self.waypoints = {i: d["params"][4:6]
+                              for i, d in enumerate(yml["mission"]["items"])
+                              if d["command"] == 16}
+            # self.altitude = {w: yml["waypoints"][w][2] for w in yml["waypoints"]}
+            self.altitude = {i: d["AMSLAltAboveTerrain"]
+                              for i, d in enumerate(yml["mission"]["items"])
+                              if d["command"] == 16}
             self.fence = yml["geoFence"]["polygons"][0]
             if not self.fence["inclusion"]:
                 sys.exit("Error: the geoFence is not an inclusion zone")
@@ -93,7 +103,7 @@ class Mission():
 
 
 class Path_planner():
-    def __init__(self, map_path, max_edge_length):
+    def __init__(self, map_path, max_edge_length, node=None):
         # Store the last path for visualization purposes
         self.last_start = None
         self.last_end = None
@@ -102,6 +112,8 @@ class Path_planner():
         self.lock = threading.Lock()
         self.max_edge_length = max_edge_length
         self.map_path = map_path
+
+        self.node = node
 
         # Check that max eddge len is a positive number below 500
         if not isinstance(self.max_edge_length, int):
@@ -164,9 +176,8 @@ class Path_planner():
         if map_yaml["quad_plan_format"] == "Sim":
             self.mission = Mission(mission_file, mission_file_format)
         elif map_yaml["quad_plan_format"] == "QGC":
-            origin = utm.from_latlon(map_yaml["gps_origin_lat"],
-                                     map_yaml["gps_origin_long"])[:2]
-            self.origin = np.array(origin)
+            self.origin = np.array([float(map_yaml["gps_origin_lat"]),
+                                   float(map_yaml["gps_origin_long"])])
             self.mission = Mission(mission_file, map_yaml["quad_plan_format"],
                                    self.origin)
         else:
@@ -174,6 +185,17 @@ class Path_planner():
 
         # Generate the graph and calculate costs with Dijkstra
         self.generateGraph()
+
+    def logger(self, msg, msgtype="info"):
+        assert isinstance(msg, str)
+        if self.node is not None:
+            if msgtype == "info":
+                self.node.get_logger().info(msg)
+            elif msgtype == "error":
+                self.node.get_logger().error(msg)
+        else:
+            print(msg)
+
 
     def scale_points(self, utms_x, utms_y):
         """ scale_points can take an utm point and return the corresponding
@@ -275,9 +297,12 @@ class Path_planner():
             # Check that we have at least one route to all the waypoints
             # shutdown node otherwise
             if len(points[i]["neigh"]) == 0:
-                rospy.logerr("No route to waypoint {}".format(i))
-                rospy.signal_shutdown("No route to waypoint {}".format(i))
-                # return
+                self.logger("No route to waypoint {}".format(i), msgtype="error")
+                if self.node is not None:
+                    self.node.shutdown()
+                else:
+                    sys.exit()
+
 
         # Fill the neighbor distances
         for i in points:
@@ -299,11 +324,11 @@ class Path_planner():
 
         if start_x < 0 or start_x > self.img.shape[1] or \
                 start_y < 0 or start_y > self.img.shape[0]:
-            rospy.logerr("Start point outside image range")
+            self.logger("Start point outside image range", msgtype="error")
             return None
         if end_x < 0 or end_x > self.img.shape[1] or \
                 end_y < 0 or end_y > self.img.shape[0]:
-            rospy.logerr("End point outside image range")
+            self.logger("End point outside image range", msgtype="error")
             return None
 
         # Check that the points are within the allowed geofence
@@ -324,7 +349,8 @@ class Path_planner():
         point_mask = cv2.circle(point_mask, (end_x, end_y),
                                 10, 255, 2)
         if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
-            rospy.logerr("Start or end point is outside the allowed geofence")
+            self.logger("Start or end point is outside the allowed geofence",
+                        msgtype="error")
             return None
 
         # Find the closest waypoint to the start and end
@@ -376,7 +402,7 @@ class Path_planner():
                                                    self.polygon_mask)
                     # Check if the line intersects with the noFly zone
                     if cv2.countNonZero(intersection) == 0:
-                        rospy.loginfo("Removing first waypoint")
+                        self.logger("Removing first waypoint")
                         self.last_path.pop(0)
 
         return self.last_path.copy()
@@ -516,7 +542,7 @@ class Path_planner():
             return img
 
 
-if __name__ == "__main__":
+def main():
     # read program arguments
     parser = argparse.ArgumentParser(
             prog=f"{os.path.basename(__file__)}",
@@ -532,10 +558,7 @@ if __name__ == "__main__":
                         action='store_true', required=False)
     args = parser.parse_args()
 
-    import rospkg
-    rospack = rospkg.RosPack()
-    semantics_path = rospack.get_path('semantics_manager')
-    map_path = os.path.join(semantics_path, "maps", args.map_name, "map_config.yaml")
+    map_path = args.map_name
     max_edge_length = args.max_edge_length
 
     print(f"Map path: {map_path}")
@@ -564,3 +587,6 @@ if __name__ == "__main__":
             i += 1
             if i == 3:
                 break
+
+if __name__ == "__main__":
+    main()

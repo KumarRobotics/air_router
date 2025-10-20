@@ -1,0 +1,9 @@
+svg_origin_x: 0
+svg_origin_y: 0
+init_pos_px_x: -1
+init_pos_px_y: -1
+init_pos_px_cov: 2
+init_pos_m_x: 3
+init_pos_m_y: 85
+init_pos_deg_theta: -20
+init_pos_deg_cov: 5
