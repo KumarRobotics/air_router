@@ -18,6 +18,8 @@ from std_msgs.msg import String
 
 import rclpy
 from rclpy.node import Node
+from rclpy.task import Future
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from air_router import route_planner
 
@@ -139,21 +141,26 @@ class Navigator(Node):
         self.stop_go_to_target = threading.Event()
         self.explore_thread = None
 
+        # Best-Effort QoS
+        be_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+
         # Create a subscriber for the UAV position. This is for the simulator.
         # For the real world, we will use the GPS input here
         if self.sim:
-            self.create_subscription(PoseStamped, 'unity_ros/quadrotor/TrueState/pose', self.pose_callback, 1)
+            self.get_logger().warn("Setting pose callback")
+            self.pose_sub = self.create_subscription(PoseStamped, 'mavros/local_position/pose', self.pose_callback, be_qos)
         else:
-            self.create_subscription(NavSatFix, 'mavros/global_position/global', self.gps_callback, 1)
+            self.pose_sub = self.create_subscription(NavSatFix, 'mavros/global_position/global', self.gps_callback, be_qos)
 
-        # Publish the goal for the UAV. For simulation, we will just publish a
-        # goal, for the real world, we will use the mavros interface
-        if self.sim:
-            self.uav_goal = self.create_publisher(PointStamped, 'goal', 10)
-        else:
-            self.set_cur_wp = self.create_client(WaypointSetCurrent, 'mavros/mission/set_current')
-            while not self.set_cur_wp.wait_for_service(timeout_sec=1.0):
-                self.get_logger().info('service not available, waiting again...')
+        # Publish the goal for the UAV
+        self.set_cur_wp = self.create_client(WaypointSetCurrent, '/mavros/mission/set_current')
+        while not self.set_cur_wp.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('service not available, waiting again...')
+        self.get_logger().info('Waypoint service up')
 
         # Create subscribers _after loading services_ for the state machine
         # topics: goal and coordinates
@@ -282,24 +289,23 @@ class Navigator(Node):
         pose.pose.position.y = y
         self.uav_pose = pose
 
+    def callback_waypoint_uav(self, future: Future):
+        response = future.result()
+        if response is not None:
+            self.get_logger().info(f"Waypoint service response: {response.success}")
+        else:
+            self.get_logger().warn("Waypoint service response was None.")
+
     def send_waypoint_uav(self, target_wpt):
         self.get_logger().info(f"Asked to move to wp {target_wpt}")
-        # For simulation purposes, we will publish the target waypoint
-        if self.sim:
-            target = PointStamped()
-            target.header.stamp = self.get_clock().now().to_msg()
-            waypoint = self.planner.mission.waypoints[target_wpt]
-            alt = self.planner.mission.altitude[target_wpt]
-            target.point.x = float(waypoint[0])
-            target.point.y = float(waypoint[1])
-            target.point.z = float(alt)
-            self.uav_goal.publish(target)
-        else:
-            # Call the mavros service to set the current waypoint
-            try:
-                self.set_cur_wp(target_wpt)
-            except Exception as e:
-                self.get_logger().error(f"Service call failed: {e}")
+        wp_req = WaypointSetCurrent.Request()
+        wp_req.wp_seq = target_wpt
+        # Call the mavros service to set the current waypoint
+        try:
+            self.future = self.set_cur_wp.call_async(wp_req)
+            self.future.add_done_callback(self.callback_waypoint_uav)
+        except Exception as e:
+            self.get_logger().error(f"Service call failed: {e}")
 
     def arrived_at_waypoint(self, waypoint):
         if self.uav_pose is not None:
@@ -325,7 +331,7 @@ class Navigator(Node):
             # rate = rospy.Rate(10)
             # ROS2 equivalent of rospy.Rate(10)
             rate = self.outer.create_rate(10)
-            # self.get_logger().info(f"{self.get_name()}: Exploration - Start")
+            rclpy.node.get_logger("navigator:ExplorationThread").info(f"Exploration - Start")
             while rclpy.ok() and not self.stop_event.is_set():
                 # Get the top element on the list as target waypoint
                 target = self.outer.explore_target_waypt[0]
@@ -344,8 +350,8 @@ class Navigator(Node):
                 img = cv2.circle(img, tuple(target_px), 10, (0, 0, 255), 2)
                 self.outer.vis_pub.publish(cv_to_ros(img))
 
-                self.get_logger().info(
-                    f"{self.get_name()}: Exploration - Going to waypoint %s", target
+                rclpy.node.get_logger("navigator:ExplorationThread").info(
+                    f"Exploration - Going to waypoint {target}"
                 )
                 while (
                     not self.outer.arrived_at_waypoint(target)
@@ -372,7 +378,7 @@ class Navigator(Node):
             self.stop_event.clear()
             rate = self.outer.create_rate(10)
 
-            # self.get_logger().info(f"{self.get_name()}: GoToTarget - Start")
+            # rclpy.node.get_logger("navigator:ExplorationThread").info(f"GoToTarget - Start")
 
             # Wait until we have a valid robot pose
             while (
@@ -392,32 +398,32 @@ class Navigator(Node):
                 [pos.x, pos.y], [robot_target.x, robot_target.y]
             )
             if route is None:
-                self.get_logger().error(f"{self.get_name()}: GoToTarget - Could not find route.")
+                rclpy.node.get_logger("navigator:ExplorationThread").error(f"GoToTarget - Could not find route.")
                 return
 
             if len(route) == 0:
-                self.get_logger().info(
-                    f"{self.get_name()}: GoToTarget - Already at the target."
+                rclpy.node.get_logger("navigator:ExplorationThread").info(
+                    f"GoToTarget - Already at the target."
                 )
                 return
 
             # Check if we are already at the first waypoint
             if self.outer.arrived_at_waypoint(route[0]):
                 if len(route) == 1:
-                    self.get_logger().info(
-                        f"{self.get_name()}: GoToTarget - Already at the target."
+                    rclpy.node.get_logger("navigator:ExplorationThread").info(
+                        f"GoToTarget - Already at the target."
                     )
                     return
                 else:
                     route = route[1:]
 
-            self.get_logger().info(f"{self.get_name()}: GoToTarget - Route: {route}")
+            rclpy.node.get_logger("navigator:ExplorationThread").info(f"GoToTarget - Route: {route}")
 
             while rclpy.ok() and not self.stop_event.is_set():
                 # Get the top element of the route
                 target = route.pop(0)
-                self.get_logger().info(
-                    f"{self.get_name()}: GoToTarget - Going to waypoint %s", target
+                rclpy.node.get_logger("navigator:ExplorationThread").info(
+                    f"GoToTarget - Going to waypoint {target}"
                 )
                 # Send target waypoint to the UAV and check if we arrived. If we
                 # arrived, send the next waypoint
@@ -460,7 +466,7 @@ class Navigator(Node):
                 # Check if we made it to the end
                 if len(route) == 0 and self.outer.arrived_at_waypoint(target):
                     self.outer.set_mode(self.outer.Mode.go_to_target_end)
-                    self.get_logger().info(f"{self.get_name()}: GoToTarget: reached goal")
+                    rclpy.node.get_logger("navigator:ExplorationThread").info(f"GoToTarget: reached goal")
                     return
 
 
