@@ -148,13 +148,8 @@ class Navigator(Node):
             depth=1
         )
 
-        # Create a subscriber for the UAV position. This is for the simulator.
-        # For the real world, we will use the GPS input here
-        if self.sim:
-            self.get_logger().warn("Setting pose callback")
-            self.pose_sub = self.create_subscription(PoseStamped, 'mavros/local_position/pose', self.pose_callback, be_qos)
-        else:
-            self.pose_sub = self.create_subscription(NavSatFix, 'mavros/global_position/global', self.gps_callback, be_qos)
+        # Create a subscriber for the UAV position. Use GPS input
+        self.pose_sub = self.create_subscription(NavSatFix, 'mavros/global_position/global', self.gps_callback, be_qos)
 
         # Publish the goal for the UAV
         self.set_cur_wp = self.create_client(WaypointSetCurrent, '/mavros/mission/set_current')
@@ -253,10 +248,7 @@ class Navigator(Node):
             self.set_mode(self.Mode.transition)
             # Go to the last exploration position
             p = self.planner.mission.waypoints[self.explore_target_waypt[0]]
-            if self.sim:
-                alt = self.planner.mission.altitude[self.explore_target_waypt[0]]
-            else:
-                alt = 40
+            alt = 40
             self.robot_target = Point(p[0], p[1], alt)
             self.goto_target_thread = self.GoToTargetThread(
                 self, self.stop_go_to_target
@@ -281,7 +273,7 @@ class Navigator(Node):
         # Convert the GPS coordinates to the map frame
         lat = data.latitude
         lon = data.longitude
-        x, y = np.array(utm.from_latlon(lat, lon)[:2]) - np.array(utm.from_latlon(self.planner.origin)[:2])
+        x, y = np.array(utm.from_latlon(lat, lon)[:2]) - np.array(utm.from_latlon(self.planner.origin[0], self.planner.origin[1])[:2])
         pose = PoseStamped()
         pose.header.frame_id = "quad"
         pose.header.stamp = self.get_clock().now().to_msg()
@@ -313,7 +305,7 @@ class Navigator(Node):
             curr = np.array(
                 [self.uav_pose.pose.position.x, self.uav_pose.pose.position.y]
             )
-            # self.get_logger().info(f"Current position: {curr}, target: {wp}")
+            # self.get_logger().info(f"Current position: {curr}, target: {wp} ({waypoint})")
             if np.linalg.norm(curr - wp) < self.acceptance_radius:
                 return True
         else:

@@ -9,4 +9,4 @@ img_resolution: 5.07
 image_origin_px_x: 1097
 image_origin_px_y: 1073
 quad_plan: sim_quad_plan.plan
-quad_plan_format: Sim
+quad_plan_format: QGC
