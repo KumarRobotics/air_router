@@ -99,6 +99,78 @@ class Mission():
         else:
             sys.exit(f"Error: {mission_file_format} is not a valid format")
 
+    def generate_mission_file(self):
+        """ Regenerate a QGC mission from the generic mission file  """
+        assert len(self.waypoints) > 0
+        mission = {}
+        mission["fileType"] = "Plan"
+        mission["geoFence"] = {}
+        mission["geoFence"]["circles"] = []
+        mission["geoFence"]["polygons"] = []
+        # Get UTM zone from origin
+        ox, oy, z, l = utm.from_latlon(self.origin[0], self.origin[1])
+        # Inclusion polygon
+        d = {"inclusion": True, "polygon": [], "version": 1}
+        for p in self.fence["polygon"]:
+            lat, lon = utm.to_latlon(p[0] + ox, p[1] + oy, z, l)
+            d["polygon"].append([lat, lon])
+        mission["geoFence"]["polygons"].append(d)
+        # Exclusion polygons
+        for zone in self.noFly:
+            d = {"inclusion": False, "polygon": [], "version": 1}
+            for p in zone:
+                coord = utm.to_latlon(p[0] + ox, p[1] + oy, z, l)
+                d["polygon"].append(coord)
+            mission["geoFence"]["polygons"].append(d)
+        mission["geoFence"]["version"] = 2
+        mission["groundStation"] = "QGroundControl"
+        mission["version"] = 1
+        mission["mission"] = {}
+        mission["mission"]["items"] = []
+        mission["mission"]["version"] = 2
+        mission["mission"]["vehicleType"] = 2
+        mission["mission"]["firmwareType"] = 12
+        mission["mission"]["globalPlanAltitudeMode"] = 1
+        mission["mission"]["hoverSpeed"] = 3
+        mission["mission"]["cruiseSpeed"] = 15
+        mission["mission"]["plannedHomePosition"] = [self.origin[0],
+                                                     self.origin[1], 0]
+        mission["rallyPoints"] = {}
+        mission["rallyPoints"]["points"] = []
+        mission["rallyPoints"]["version"] = 2
+
+        # Add mission waypoints
+        id = 1
+        item_178 = {"autoContinue": True, "command": 178, "doJumpId": id, "frame": 2,
+                    "params": [ 1, 3.5, -1, 0, 0, 0, 0 ], "type": "SimpleItem"}
+        mission["mission"]["items"].append(item_178)
+        id += 1
+        item_22 = {"AMSLAltAboveTerrain": 40, "Altitude": 40, "AltitudeMode": 1,
+                   "autoContinue": True, "command": 22,
+                   "doJumpId": id, "frame": 3,
+                   "params": [ 0, 0, 0, 0, self.origin[0], self.origin[1], 40 ],
+                   "type": "SimpleItem" }
+        mission["mission"]["items"].append(item_22)
+        id += 1
+        for k, v in self.waypoints.items():
+            coord = utm.to_latlon(v[0] + ox, v[1] + oy, z, l)
+            item_16 = {"AMSLAltAboveTerrain": 40,
+                       "Altitude": 40, "AltitudeMode": 1,
+                       "autoContinue": False, "command": 16, "doJumpId": id,
+                       "frame": 3, "params": [ 30, 0, 0, 0, coord[0], coord[1], 40 ], "type": "SimpleItem" }
+            mission["mission"]["items"].append(item_16)
+            id += 1
+
+        # Save the mission file
+        path = Path(self.mission_file)
+        new_filename = str(path.stem) + "_modified" + str(path.suffix)
+        new_path = path.parent / new_filename
+
+        print(f"Saving modified file into {new_path}")
+
+        with open(new_path,"w") as f:
+            json.dump(mission,f, indent=4)
+
 
 class Path_planner():
     def __init__(self, map_path, max_edge_length, node=None):
