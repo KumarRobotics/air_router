@@ -520,6 +520,64 @@ class Path_planner():
                 current_node = predecessors[current_node]
         return (dist, paths)
 
+    def generate_waypoints(self):
+        # Get a mask with the geofences and no fly zones
+        polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+        polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
+
+        # Dilate the mask so that the lines are not too close to the fence
+        # Important: this dilation needs to be larger than the default dilation
+        # used for graph generation
+        kernel_size = int(self.resolution*self.scale_factor)*9
+        polygon_mask = cv2.dilate(polygon_mask,
+                                       np.ones((kernel_size, kernel_size),
+                                               np.uint8),
+                                       iterations=1)
+
+        # Pick random points within the positive mask
+        positive_idx = np.argwhere(polygon_mask == 0)
+        random_idx = np.random.randint(0, positive_idx.shape[0],
+                                       size=positive_idx.shape[0]//500)
+        samples = positive_idx[random_idx]
+        image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
+                        dtype=np.uint8)*255
+        image[polygon_mask == 0] = 0
+
+        # Filter the points so that they are at least 5 m separated
+        target_distance = 5
+        filtered_samples = []
+        for (x1, y1) in samples:
+            is_valid = True
+            for (x2, y2) in filtered_samples:
+                d_px = np.linalg.norm([[y2-y1, x2-x1]])
+                d_m = d_px / self.resolution
+                if d_m < target_distance:
+                    is_valid = False
+                    break
+            if is_valid:
+                filtered_samples.append([x1, y1])
+        filtered_samples = np.array(filtered_samples)
+        filtered_utm = self.scale_pixels(filtered_samples[:, 1], filtered_samples[:, 0])
+        filtered_utm = np.array(filtered_utm).T
+
+        # Sort them so they look prettier
+        filtered_utm = filtered_utm[np.lexsort((filtered_utm[:, 1], filtered_utm[:, 0]))]
+        replacement_wpts = {i+2: [p[0], p[1]] for i, p in enumerate(filtered_utm)}
+        self.mission.waypoints = replacement_wpts
+        # Display replacement wpts
+        # for p in filtered_samples:
+        #     cv2.circle(image, (p[1], p[0]), radius=3, color=(0, 0, 255), thickness=-1)
+        # imS = cv2.resize(image, (image.shape[0]//4, image.shape[1]//4))
+        # cv2.imshow("mask", imS)
+        # cv2.waitKey(0)
+
+        # Save the generated file
+        self.mission.generate_mission_file()
+
+        # We need to regenerate the graph with the current points
+        self.generateGraph()
+
+
     def display_points(self, get_image=False, origin=False, waypoints=False,
                        noFly=False, rally=False, routes=False, plan=False):
         old_x = None
@@ -640,9 +698,12 @@ def main():
                         required=True)
     parser.add_argument('--max_edge_length',
                         help='Max edge length for the graph',
-                        required=False, default=100, type=int)
+                        required=False, default=20, type=int)
     parser.add_argument('--save_graph',
                         help='Save the waypoint graph as a json',
+                        action='store_true', required=False)
+    parser.add_argument('--generate_waypoints',
+                        help='Generate a new waypoint mission based on the input mission fences',
                         action='store_true', required=False)
     args = parser.parse_args()
 
@@ -655,10 +716,18 @@ def main():
 
     # Create a path planner object
     q = Path_planner(map_path, max_edge_length)
+
+    # Optionally, generate new waypoints from the mission file and save it as a
+    # .plan file
+    if args.generate_waypoints:
+        q.generate_waypoints()
+
+    # Optionally, save the graph into a yaml file
     if args.save_graph:
         graph_sanitized = {i: {'utm': q.graph[i]['latlon'], 'edges': q.graph[i]['neigh']} for i in q.graph}
         with open('graph_dump.json', 'w') as json_file:
             json.dump(graph_sanitized, json_file, indent=4)
+
     q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
