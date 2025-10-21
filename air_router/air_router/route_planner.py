@@ -4,16 +4,14 @@ import heapq
 import json
 import os
 import pdb
-import pprint
 import random
 import sys
 import threading
 
 import cv2
 import numpy as np
-# import rospy
-import rclpy
 import utm
+from pathlib import Path
 import yaml
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
@@ -213,6 +211,24 @@ class Path_planner():
         if len(x) == 1:
             return x[0], y[0]
         return x, y
+
+    def scale_pixels(self, p_x, p_y):
+        """ scale_pixels can take a pixel and return the corresponding utm
+        coordinates """
+        if isinstance(p_x, float):
+            p_x = [p_x]
+            p_y = [p_y]
+        utms_x = []
+        utms_y = []
+        for pxs_x, pxs_y, in zip(p_x, p_y):
+            utm_x_, utm_y_ = [(pxs_x-self.image_origin_px_x)/self.resolution,
+                              -(pxs_y - self.image_origin_px_y)/self.resolution]
+            utms_x.append(utm_x_)
+            utms_y.append(utm_y_)
+        if len(utms_x) == 1:
+            return utms_x[0], utms_y[0]
+        return utms_x, utms_y
+
 
     def getDistance(self, p1, p2):
         """Gets the distance in meters from two points p0 and p2, both points in
