@@ -4,16 +4,14 @@ import heapq
 import json
 import os
 import pdb
-import pprint
 import random
 import sys
 import threading
 
 import cv2
 import numpy as np
-# import rospy
-import rclpy
 import utm
+from pathlib import Path
 import yaml
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
@@ -100,6 +98,78 @@ class Mission():
 
         else:
             sys.exit(f"Error: {mission_file_format} is not a valid format")
+
+    def generate_mission_file(self):
+        """ Regenerate a QGC mission from the generic mission file  """
+        assert len(self.waypoints) > 0
+        mission = {}
+        mission["fileType"] = "Plan"
+        mission["geoFence"] = {}
+        mission["geoFence"]["circles"] = []
+        mission["geoFence"]["polygons"] = []
+        # Get UTM zone from origin
+        ox, oy, z, l = utm.from_latlon(self.origin[0], self.origin[1])
+        # Inclusion polygon
+        d = {"inclusion": True, "polygon": [], "version": 1}
+        for p in self.fence["polygon"]:
+            lat, lon = utm.to_latlon(p[0] + ox, p[1] + oy, z, l)
+            d["polygon"].append([lat, lon])
+        mission["geoFence"]["polygons"].append(d)
+        # Exclusion polygons
+        for zone in self.noFly:
+            d = {"inclusion": False, "polygon": [], "version": 1}
+            for p in zone:
+                coord = utm.to_latlon(p[0] + ox, p[1] + oy, z, l)
+                d["polygon"].append(coord)
+            mission["geoFence"]["polygons"].append(d)
+        mission["geoFence"]["version"] = 2
+        mission["groundStation"] = "QGroundControl"
+        mission["version"] = 1
+        mission["mission"] = {}
+        mission["mission"]["items"] = []
+        mission["mission"]["version"] = 2
+        mission["mission"]["vehicleType"] = 2
+        mission["mission"]["firmwareType"] = 12
+        mission["mission"]["globalPlanAltitudeMode"] = 1
+        mission["mission"]["hoverSpeed"] = 3
+        mission["mission"]["cruiseSpeed"] = 15
+        mission["mission"]["plannedHomePosition"] = [self.origin[0],
+                                                     self.origin[1], 0]
+        mission["rallyPoints"] = {}
+        mission["rallyPoints"]["points"] = []
+        mission["rallyPoints"]["version"] = 2
+
+        # Add mission waypoints
+        id = 1
+        item_178 = {"autoContinue": True, "command": 178, "doJumpId": id, "frame": 2,
+                    "params": [ 1, 3.5, -1, 0, 0, 0, 0 ], "type": "SimpleItem"}
+        mission["mission"]["items"].append(item_178)
+        id += 1
+        item_22 = {"AMSLAltAboveTerrain": 40, "Altitude": 40, "AltitudeMode": 1,
+                   "autoContinue": True, "command": 22,
+                   "doJumpId": id, "frame": 3,
+                   "params": [ 0, 0, 0, 0, self.origin[0], self.origin[1], 40 ],
+                   "type": "SimpleItem" }
+        mission["mission"]["items"].append(item_22)
+        id += 1
+        for k, v in self.waypoints.items():
+            coord = utm.to_latlon(v[0] + ox, v[1] + oy, z, l)
+            item_16 = {"AMSLAltAboveTerrain": 40,
+                       "Altitude": 40, "AltitudeMode": 1,
+                       "autoContinue": False, "command": 16, "doJumpId": id,
+                       "frame": 3, "params": [ 30, 0, 0, 0, coord[0], coord[1], 40 ], "type": "SimpleItem" }
+            mission["mission"]["items"].append(item_16)
+            id += 1
+
+        # Save the mission file
+        path = Path(self.mission_file)
+        new_filename = str(path.stem) + "_modified" + str(path.suffix)
+        new_path = path.parent / new_filename
+
+        print(f"Saving modified file into {new_path}")
+
+        with open(new_path,"w") as f:
+            json.dump(mission,f, indent=4)
 
 
 class Path_planner():
@@ -213,6 +283,24 @@ class Path_planner():
         if len(x) == 1:
             return x[0], y[0]
         return x, y
+
+    def scale_pixels(self, p_x, p_y):
+        """ scale_pixels can take a pixel and return the corresponding utm
+        coordinates """
+        if isinstance(p_x, float):
+            p_x = [p_x]
+            p_y = [p_y]
+        utms_x = []
+        utms_y = []
+        for pxs_x, pxs_y, in zip(p_x, p_y):
+            utm_x_, utm_y_ = [(pxs_x-self.image_origin_px_x)/self.resolution,
+                              -(pxs_y - self.image_origin_px_y)/self.resolution]
+            utms_x.append(utm_x_)
+            utms_y.append(utm_y_)
+        if len(utms_x) == 1:
+            return utms_x[0], utms_y[0]
+        return utms_x, utms_y
+
 
     def getDistance(self, p1, p2):
         """Gets the distance in meters from two points p0 and p2, both points in
@@ -432,6 +520,64 @@ class Path_planner():
                 current_node = predecessors[current_node]
         return (dist, paths)
 
+    def generate_waypoints(self):
+        # Get a mask with the geofences and no fly zones
+        polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+        polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
+
+        # Dilate the mask so that the lines are not too close to the fence
+        # Important: this dilation needs to be larger than the default dilation
+        # used for graph generation
+        kernel_size = int(self.resolution*self.scale_factor)*9
+        polygon_mask = cv2.dilate(polygon_mask,
+                                       np.ones((kernel_size, kernel_size),
+                                               np.uint8),
+                                       iterations=1)
+
+        # Pick random points within the positive mask
+        positive_idx = np.argwhere(polygon_mask == 0)
+        random_idx = np.random.randint(0, positive_idx.shape[0],
+                                       size=positive_idx.shape[0]//500)
+        samples = positive_idx[random_idx]
+        image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
+                        dtype=np.uint8)*255
+        image[polygon_mask == 0] = 0
+
+        # Filter the points so that they are at least 5 m separated
+        target_distance = 5
+        filtered_samples = []
+        for (x1, y1) in samples:
+            is_valid = True
+            for (x2, y2) in filtered_samples:
+                d_px = np.linalg.norm([[y2-y1, x2-x1]])
+                d_m = d_px / self.resolution
+                if d_m < target_distance:
+                    is_valid = False
+                    break
+            if is_valid:
+                filtered_samples.append([x1, y1])
+        filtered_samples = np.array(filtered_samples)
+        filtered_utm = self.scale_pixels(filtered_samples[:, 1], filtered_samples[:, 0])
+        filtered_utm = np.array(filtered_utm).T
+
+        # Sort them so they look prettier
+        filtered_utm = filtered_utm[np.lexsort((filtered_utm[:, 1], filtered_utm[:, 0]))]
+        replacement_wpts = {i+2: [p[0], p[1]] for i, p in enumerate(filtered_utm)}
+        self.mission.waypoints = replacement_wpts
+        # Display replacement wpts
+        # for p in filtered_samples:
+        #     cv2.circle(image, (p[1], p[0]), radius=3, color=(0, 0, 255), thickness=-1)
+        # imS = cv2.resize(image, (image.shape[0]//4, image.shape[1]//4))
+        # cv2.imshow("mask", imS)
+        # cv2.waitKey(0)
+
+        # Save the generated file
+        self.mission.generate_mission_file()
+
+        # We need to regenerate the graph with the current points
+        self.generateGraph()
+
+
     def display_points(self, get_image=False, origin=False, waypoints=False,
                        noFly=False, rally=False, routes=False, plan=False):
         old_x = None
@@ -552,9 +698,12 @@ def main():
                         required=True)
     parser.add_argument('--max_edge_length',
                         help='Max edge length for the graph',
-                        required=False, default=100, type=int)
+                        required=False, default=20, type=int)
     parser.add_argument('--save_graph',
                         help='Save the waypoint graph as a json',
+                        action='store_true', required=False)
+    parser.add_argument('--generate_waypoints',
+                        help='Generate a new waypoint mission based on the input mission fences',
                         action='store_true', required=False)
     args = parser.parse_args()
 
@@ -567,10 +716,18 @@ def main():
 
     # Create a path planner object
     q = Path_planner(map_path, max_edge_length)
+
+    # Optionally, generate new waypoints from the mission file and save it as a
+    # .plan file
+    if args.generate_waypoints:
+        q.generate_waypoints()
+
+    # Optionally, save the graph into a yaml file
     if args.save_graph:
         graph_sanitized = {i: {'utm': q.graph[i]['latlon'], 'edges': q.graph[i]['neigh']} for i in q.graph}
         with open('graph_dump.json', 'w') as json_file:
             json.dump(graph_sanitized, json_file, indent=4)
+
     q.display_points(waypoints=True, noFly=True, origin=True)
 
     i = 0
