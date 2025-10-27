@@ -7,6 +7,7 @@ import pdb
 import random
 import sys
 import threading
+import math
 
 import cv2
 import numpy as np
@@ -525,10 +526,11 @@ class Path_planner():
                 current_node = predecessors[current_node]
         return (dist, paths)
 
-    def generate_waypoints(self, strategy = "kmeans"):
+    def generate_waypoints(self, strategy = "kmeans", cell_area = 400.0):
         '''
         Generate waypoints given the current geo-fencing. Possible strategies include:
-            "kmeans" : Uses k-means clustering over a uniform sampling. This generally creates more evenly spaced waypoints
+            "kmeans" : Uses k-means clustering over a uniform sampling. We set k such that each waypoint covers
+                roughly cell_area square-meters. This generally creates more evenly spaced waypoints
             "random" : Picks waypoint locations randomly and thins-out areas where points are too close together
         '''
         # Get a mask with the geofences and no fly zones
@@ -543,12 +545,16 @@ class Path_planner():
                                        np.ones((kernel_size, kernel_size),
                                                np.uint8),
                                        iterations=1)
-        
+
         if strategy == "kmeans":
-            # Create a regular grid of pixel coordinates spaced every 5 pixels
-            step = 5
-            rows = np.arange(0, polygon_mask.shape[0], step)
-            cols = np.arange(0, polygon_mask.shape[1], step)
+            # Determine the number of pixels per waypoint
+            px_per_m = self.resolution
+            # We want ~1 waypoint per 3 meters
+            px_per_wp = math.floor(px_per_m * 3.0)
+
+            # Create a regular grid of pixel coordinates
+            rows = np.arange(0, polygon_mask.shape[0], px_per_wp)
+            cols = np.arange(0, polygon_mask.shape[1], px_per_wp)
             grid_y, grid_x = np.meshgrid(rows, cols, indexing='ij')
 
             # Stack coordinates into (N, 2) array of [y, x]
@@ -558,9 +564,19 @@ class Path_planner():
             valid_mask = polygon_mask[grid_y, grid_x] == 0
             samples = grid_points[valid_mask.ravel()]
 
+            # Determine how many clusters we want
+            area_per_wp = (px_per_wp * (1.0/px_per_m))**2
+            wp_per_area = 1.0/area_per_wp
+            cluster_size = round(wp_per_area * cell_area)
+            num_clusters = round(len(samples)/cluster_size)
+
+            print(f"Number of grid points: {len(samples)}")
+            print(f"Approximate total area: {area_per_wp * len(samples)}")
+            print(f"Desirded clusters: {num_clusters}")
+
             # Run k-means clustering
             clst = Clustering()
-            samples = np.array(clst.kmeans(100, samples))
+            samples = np.array(clst.kmeans(num_clusters, samples))
             samples = samples.astype(np.int64)
 
             filtered_utm = self.scale_pixels(samples[:, 1], samples[:, 0])

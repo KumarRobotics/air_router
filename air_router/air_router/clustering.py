@@ -4,56 +4,66 @@ import math
 class Clustering():
     def __init__(self):
         pass 
-    
+
     def kmeans(self, k, points):
-        # Initialize centroids
-        # centroids ← list of k starting centroids
+        # Initialize centroids to random waypoint locations
         centroids = points[np.random.choice(points.shape[0], size=k, replace=False)]
 
-        # converged ← false
-        converged = False
+        # Book keeping variables
+        iteration_count = 0
+        regression_count = 0
+        previous_shift = 10000000000.0
 
-        # while converged == false do
-        count = 0
-        while not converged and count < 20:
-            # clusters ← list of k empty lists
+        # What we haven't converged onto a solution...
+        while regression_count < 3 and iteration_count < k:
+            # Create empty clusters
             clusters = [[] for _ in range(k)]
 
-            # for i ← 0 to length(points) - 1 do
+            # For each each waypoint i
             for i in range(len(points)):
                 # Guess that i belongs to cluster 0
                 closestIndex = 0
                 midDist = self.distance(points[i], centroids[0])
-                # Search for closest cluster
+
+                # Search for closest centroid
                 for j in range(len(centroids)):
                     dist = self.distance(points[i], centroids[j])
+                    # Is this a closer centroid?
                     if dist < midDist:
                         # Found better fit
                         midDist = dist
                         closestIndex = j
-                # Add point to closest cluster
+
+                # Add point to cluster of closest centroid
                 clusters[closestIndex].append(points[i].tolist())
 
             # Recalculate centroids as the mean of each cluster
             newCentroids = []
-            converged = True
             largest_shift = 0
             for i in range(k):
                 newCentroid = self.calculateCentroid(clusters[i])
                 newCentroids.append(newCentroid)
                 shift_dist = self.distance(newCentroid, centroids[i])
-                if shift_dist > 3.0:
-                    converged = False
+                # Is this the biggest shift?
                 if largest_shift < shift_dist:
                     largest_shift = shift_dist
+
+            # Save our updated cluster points
             centroids = newCentroids
+
+            # Did we make meaningful prgress?
+            if largest_shift > previous_shift:
+                # No... noted
+                regression_count += 1
+            previous_shift = largest_shift
+
             print(f"Created new clusters, largest shift = {largest_shift}")
-            count += 1
+            iteration_count += 1
 
         # If we made it this far... then we converged!
-        print("Clustering converged!")
+        print(f"Clustering converged after {iteration_count} iterations!")
         return centroids
-    
+
 
     def distance(self, point_a, point_b):
         return math.sqrt((point_a[0] - point_b[0])**2 + (point_a[1] - point_b[1])**2)
