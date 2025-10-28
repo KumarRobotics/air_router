@@ -14,11 +14,7 @@ import numpy as np
 import utm
 from pathlib import Path
 import yaml
-try:
-    from air_router.clustering import Clustering
-except Exception as e:
-    print(f"Exception: {e}\n\t Are you running the script independantly?")
-    from clustering import Clustering
+from scipy.cluster.vq import kmeans
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
 be obtained from UTM (for GPS files) or as absolute coordinates for simulation
@@ -574,9 +570,11 @@ class Path_planner():
             print(f"Approximate total area: {area_per_wp * len(samples)}")
             print(f"Desirded clusters: {num_clusters}")
 
+            # Convert to floating-point
+            samples = samples.astype(np.float64)
             # Run k-means clustering
-            clst = Clustering()
-            samples = np.array(clst.kmeans(num_clusters, samples))
+            samples, _ = kmeans(samples, k_or_guess=num_clusters)
+            # Convert back to integers
             samples = samples.astype(np.int64)
 
             filtered_utm = self.scale_pixels(samples[:, 1], samples[:, 0])
