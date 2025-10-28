@@ -7,12 +7,14 @@ import pdb
 import random
 import sys
 import threading
+import math
 
 import cv2
 import numpy as np
 import utm
 from pathlib import Path
 import yaml
+from scipy.cluster.vq import kmeans
 
 """ Route planner uses standard coordinates (m) to plan the mission. These can
 be obtained from UTM (for GPS files) or as absolute coordinates for simulation
@@ -520,7 +522,13 @@ class Path_planner():
                 current_node = predecessors[current_node]
         return (dist, paths)
 
-    def generate_waypoints(self):
+    def generate_waypoints(self, strategy = "kmeans", cell_area = 400.0):
+        '''
+        Generate waypoints given the current geo-fencing. Possible strategies include:
+            "kmeans" : Uses k-means clustering over a uniform sampling. We set k such that each waypoint covers
+                roughly cell_area square-meters. This generally creates more evenly spaced waypoints
+            "random" : Picks waypoint locations randomly and thins-out areas where points are too close together
+        '''
         # Get a mask with the geofences and no fly zones
         polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
         polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
@@ -534,38 +542,82 @@ class Path_planner():
                                                np.uint8),
                                        iterations=1)
 
-        # Pick random points within the positive mask
-        positive_idx = np.argwhere(polygon_mask == 0)
-        random_idx = np.random.randint(0, positive_idx.shape[0],
-                                       size=positive_idx.shape[0]//500)
-        samples = positive_idx[random_idx]
-        image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
-                        dtype=np.uint8)*255
-        image[polygon_mask == 0] = 0
+        if strategy == "kmeans":
+            # Determine the number of pixels per waypoint
+            px_per_m = self.resolution
+            # We want ~1 waypoint per 3 meters
+            px_per_wp = math.floor(px_per_m * 3.0)
 
-        # Filter the points so that they are at least 5 m separated
-        target_distance = 5
-        filtered_samples = []
-        for (x1, y1) in samples:
-            is_valid = True
-            for (x2, y2) in filtered_samples:
-                d_px = np.linalg.norm([[y2-y1, x2-x1]])
-                d_m = d_px / self.resolution
-                if d_m < target_distance:
-                    is_valid = False
-                    break
-            if is_valid:
-                filtered_samples.append([x1, y1])
-        filtered_samples = np.array(filtered_samples)
-        filtered_utm = self.scale_pixels(filtered_samples[:, 1], filtered_samples[:, 0])
-        filtered_utm = np.array(filtered_utm).T
+            # Create a regular grid of pixel coordinates
+            rows = np.arange(0, polygon_mask.shape[0], px_per_wp)
+            cols = np.arange(0, polygon_mask.shape[1], px_per_wp)
+            grid_y, grid_x = np.meshgrid(rows, cols, indexing='ij')
+
+            # Stack coordinates into (N, 2) array of [y, x]
+            grid_points = np.stack((grid_y.ravel(), grid_x.ravel()), axis=-1)
+
+            # Filter those coordinates by the mask
+            valid_mask = polygon_mask[grid_y, grid_x] == 0
+            samples = grid_points[valid_mask.ravel()]
+
+            # Determine how many clusters we want
+            area_per_wp = (px_per_wp * (1.0/px_per_m))**2
+            wp_per_area = 1.0/area_per_wp
+            cluster_size = round(wp_per_area * cell_area)
+            num_clusters = round(len(samples)/cluster_size)
+
+            print(f"Number of grid points: {len(samples)}")
+            print(f"Approximate total area: {area_per_wp * len(samples)}")
+            print(f"Desirded clusters: {num_clusters}")
+
+            # Convert to floating-point
+            samples = samples.astype(np.float64)
+            # Run k-means clustering
+            samples, _ = kmeans(samples, k_or_guess=num_clusters)
+            # Convert back to integers
+            samples = samples.astype(np.int64)
+
+            filtered_utm = self.scale_pixels(samples[:, 1], samples[:, 0])
+            filtered_utm = np.array(filtered_utm).T
+
+        elif strategy == "random":
+            # Pick random points within the positive mask
+            positive_idx = np.argwhere(polygon_mask == 0)
+            random_idx = np.random.randint(0, positive_idx.shape[0],
+                                        size=positive_idx.shape[0]//500)
+            # samples = positive_idx[random_idx]
+            samples = positive_idx[::500]
+            # print(samples)
+            print(f"Size: {len(samples)}")
+
+            # Filter the points so that they are at least 5 m separated
+            target_distance = 5
+            filtered_samples = []
+            for (x1, y1) in samples:
+                is_valid = True
+                for (x2, y2) in filtered_samples:
+                    d_px = np.linalg.norm([[y2-y1, x2-x1]])
+                    d_m = d_px / self.resolution
+                    if d_m < target_distance:
+                        is_valid = False
+                        break
+                if is_valid:
+                    filtered_samples.append([x1, y1])
+            filtered_samples = np.array(filtered_samples)
+
+            filtered_utm = self.scale_pixels(filtered_samples[:, 1], filtered_samples[:, 0])
+            filtered_utm = np.array(filtered_utm).T
 
         # Sort them so they look prettier
         filtered_utm = filtered_utm[np.lexsort((filtered_utm[:, 1], filtered_utm[:, 0]))]
         replacement_wpts = {i+2: [p[0], p[1]] for i, p in enumerate(filtered_utm)}
         self.mission.waypoints = replacement_wpts
-        # Display replacement wpts
-        # for p in filtered_samples:
+
+        # # Display replacement wpts
+        # image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
+        #                 dtype=np.uint8)*255
+        # image[polygon_mask == 0] = 0
+        # for p in samples:
         #     cv2.circle(image, (p[1], p[0]), radius=3, color=(0, 0, 255), thickness=-1)
         # imS = cv2.resize(image, (image.shape[0]//4, image.shape[1]//4))
         # cv2.imshow("mask", imS)
@@ -712,7 +764,6 @@ def main():
 
     print(f"Map path: {map_path}")
     print(f"Max edge length: {args.max_edge_length}")
-
 
     # Create a path planner object
     q = Path_planner(map_path, max_edge_length)
