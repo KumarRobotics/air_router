@@ -615,15 +615,15 @@ class Path_planner():
         replacement_wpts = {i+2: [p[0], p[1]] for i, p in enumerate(filtered_utm)}
         self.mission.waypoints = replacement_wpts
 
-        # Display replacement wpts
-        image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
-                        dtype=np.uint8)*255
-        image[polygon_mask == 0] = 0
-        for p in samples:
-            cv2.circle(image, (p[1], p[0]), radius=3, color=(0, 0, 255), thickness=-1)
-        imS = cv2.resize(image, (image.shape[0]//4, image.shape[1]//4))
-        cv2.imshow("mask", imS)
-        cv2.waitKey(0)
+        # # Display replacement wpts
+        # image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
+        #                 dtype=np.uint8)*255
+        # image[polygon_mask == 0] = 0
+        # for p in samples:
+        #     cv2.circle(image, (p[1], p[0]), radius=3, color=(0, 0, 255), thickness=-1)
+        # imS = cv2.resize(image, (image.shape[0]//4, image.shape[1]//4))
+        # cv2.imshow("mask", imS)
+        # cv2.waitKey(0)
 
         # Save the generated file
         self.mission.generate_mission_file()
