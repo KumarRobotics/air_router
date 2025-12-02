@@ -1,0 +1,12 @@
+# Goal
+int32 waypoint
+float64 tolerance
+
+---
+# Result
+bool success
+
+---
+# Feedback
+float64 distance_to_go
+
