@@ -1,0 +1,800 @@
+#!/usr/bin/env python3
+import argparse
+import heapq
+import json
+import os
+import pdb
+import random
+import sys
+import threading
+import math
+
+import cv2
+import numpy as np
+import utm
+from pathlib import Path
+import yaml
+from scipy.cluster.vq import kmeans
+
+""" Route planner uses standard coordinates (m) to plan the mission. These can
+be obtained from UTM (for GPS files) or as absolute coordinates for simulation
+files """
+# FIXME(fclad): The file refers to "latlon" when using standard coordinates.
+
+
+class Mission():
+    """ Get a mission file and convert it to standard coordinates """
+    def __init__(self, mission_file, mission_file_format, origin=None):
+        self.mission_file = mission_file
+        with open(mission_file, 'r') as f:
+            yml = yaml.load(f, Loader=yaml.FullLoader)
+
+        if mission_file_format == "QGC":
+            # Origin should be a vector with 2 elements, with the UTM
+            # coordinates of the origin of the mission. These will be
+            # subtracted to the UTM coordinates of the waypoints to
+            # scale the mission
+            self.origin = origin
+            assert self.origin is not None
+            assert len(self.origin) == 2
+            assert isinstance(self.origin, np.ndarray)
+
+            self.origin_utm = np.array(utm.from_latlon(origin[0],
+                                                       origin[1])[:2])
+
+            # Check that the file is a valid QGC mission file
+            if (yml['fileType'] != "Plan" or
+                    yml['version'] != 1 or
+                    yml['groundStation'] != "QGroundControl"):
+                sys.exit(f"Error: {mission_file} is not a valid QGC plan file")
+
+            # Get mission in utm
+            mission = yml["mission"]["items"]
+            for m in mission:
+                if m["params"][4] is not None and m["params"][5] is not None:
+                    m["params"][4:6] = utm.from_latlon(m["params"][4],
+                                                       m["params"][5])[:2] - self.origin_utm
+
+            # Get rally points in utm
+            self.rally = [utm.from_latlon(x, y)[:2] - self.origin_utm
+                          for [x, y, _] in
+                          yml["rallyPoints"]["points"]]
+
+            # Extract waypoints from the mission
+            # Waypoints are a dictionary where the key is the waypoint numer,
+            # and the value is the standard coordinates
+            self.waypoints = {i: d["params"][4:6]
+                              for i, d in enumerate(mission)
+                              if d["command"] == 16}
+
+            # Get fence in UTM
+            self.fence = yml["geoFence"]["polygons"][0]
+            for p in self.fence["polygon"]:
+                p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin_utm
+            if not self.fence["inclusion"]:
+                sys.exit("Error: the geoFence is not an inclusion zone")
+
+            # noFly is a list of polygons, with the coordinates of the noFly
+            # zones
+            self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
+                          if not i["inclusion"]]
+            for nf in self.noFly:
+                for p in nf:
+                    p[0], p[1] = utm.from_latlon(p[0], p[1])[:2] - self.origin_utm
+        elif mission_file_format == "Sim":
+            self.noFly = [i["polygon"] for i in yml["geoFence"]["polygons"]
+                          if not i["inclusion"]]
+            self.rally = None
+            # self.waypoints = {w: [yml["waypoints"][w][0], yml["waypoints"][w][1]]
+            #                   for w in yml["waypoints"]}
+            self.waypoints = {i: d["params"][4:6]
+                              for i, d in enumerate(yml["mission"]["items"])
+                              if d["command"] == 16}
+            # self.altitude = {w: yml["waypoints"][w][2] for w in yml["waypoints"]}
+            self.altitude = {i: d["AMSLAltAboveTerrain"]
+                              for i, d in enumerate(yml["mission"]["items"])
+                              if d["command"] == 16}
+            self.fence = yml["geoFence"]["polygons"][0]
+            if not self.fence["inclusion"]:
+                sys.exit("Error: the geoFence is not an inclusion zone")
+
+        else:
+            sys.exit(f"Error: {mission_file_format} is not a valid format")
+
+    def generate_mission_file(self):
+        """ Regenerate a QGC mission from the generic mission file  """
+        assert len(self.waypoints) > 0
+        mission = {}
+        mission["fileType"] = "Plan"
+        mission["geoFence"] = {}
+        mission["geoFence"]["circles"] = []
+        mission["geoFence"]["polygons"] = []
+        # Get UTM zone from origin
+        ox, oy, z, l = utm.from_latlon(self.origin[0], self.origin[1])
+        # Inclusion polygon
+        d = {"inclusion": True, "polygon": [], "version": 1}
+        for p in self.fence["polygon"]:
+            lat, lon = utm.to_latlon(p[0] + ox, p[1] + oy, z, l)
+            d["polygon"].append([lat, lon])
+        mission["geoFence"]["polygons"].append(d)
+        # Exclusion polygons
+        for zone in self.noFly:
+            d = {"inclusion": False, "polygon": [], "version": 1}
+            for p in zone:
+                coord = utm.to_latlon(p[0] + ox, p[1] + oy, z, l)
+                d["polygon"].append(coord)
+            mission["geoFence"]["polygons"].append(d)
+        mission["geoFence"]["version"] = 2
+        mission["groundStation"] = "QGroundControl"
+        mission["version"] = 1
+        mission["mission"] = {}
+        mission["mission"]["items"] = []
+        mission["mission"]["version"] = 2
+        mission["mission"]["vehicleType"] = 2
+        mission["mission"]["firmwareType"] = 12
+        mission["mission"]["globalPlanAltitudeMode"] = 1
+        mission["mission"]["hoverSpeed"] = 3
+        mission["mission"]["cruiseSpeed"] = 15
+        mission["mission"]["plannedHomePosition"] = [self.origin[0],
+                                                     self.origin[1], 0]
+        mission["rallyPoints"] = {}
+        mission["rallyPoints"]["points"] = []
+        mission["rallyPoints"]["version"] = 2
+
+        # Add mission waypoints
+        id = 1
+        item_178 = {"autoContinue": True, "command": 178, "doJumpId": id, "frame": 2,
+                    "params": [ 1, 3.5, -1, 0, 0, 0, 0 ], "type": "SimpleItem"}
+        mission["mission"]["items"].append(item_178)
+        id += 1
+        item_22 = {"AMSLAltAboveTerrain": 40, "Altitude": 40, "AltitudeMode": 1,
+                   "autoContinue": True, "command": 22,
+                   "doJumpId": id, "frame": 3,
+                   "params": [ 0, 0, 0, 0, self.origin[0], self.origin[1], 40 ],
+                   "type": "SimpleItem" }
+        mission["mission"]["items"].append(item_22)
+        id += 1
+        for k, v in self.waypoints.items():
+            coord = utm.to_latlon(v[0] + ox, v[1] + oy, z, l)
+            item_16 = {"AMSLAltAboveTerrain": 40,
+                       "Altitude": 40, "AltitudeMode": 1,
+                       "autoContinue": False, "command": 16, "doJumpId": id,
+                       "frame": 3, "params": [ 30, 0, 0, 0, coord[0], coord[1], 40 ], "type": "SimpleItem" }
+            mission["mission"]["items"].append(item_16)
+            id += 1
+
+        # Save the mission file
+        path = Path(self.mission_file)
+        new_filename = str(path.stem) + "_modified" + str(path.suffix)
+        new_path = path.parent / new_filename
+
+        print(f"Saving modified file into {new_path}")
+
+        with open(new_path,"w") as f:
+            json.dump(mission,f, indent=4)
+
+
+class Path_planner():
+    def __init__(self, map_path, max_edge_length, node=None):
+        # Store the last path for visualization purposes
+        self.last_start = None
+        self.last_end = None
+        self.last_path = None
+        # Create a lock for the visualization objects
+        self.lock = threading.Lock()
+        self.max_edge_length = max_edge_length
+        self.map_path = map_path
+
+        self.node = node
+
+        # Check that max eddge len is a positive number below 500
+        if not isinstance(self.max_edge_length, int):
+            pdb.set_trace()
+            sys.exit("Error: max_edge_lenght must be an integer")
+        if self.max_edge_length > 500 or self.max_edge_length < 1:
+            sys.exit("Error: max_edge_length must be between 1 and 500")
+
+        # Get the image from semantics_manager
+        with open(map_path, 'r') as f:
+            map_yaml = yaml.load(f, Loader=yaml.FullLoader)
+        # Image is in the same folder as the yaml
+        image = os.path.join(os.path.dirname(map_path), map_yaml["color"])
+
+        # Get resolution (px/m) and image origin pixels from the yaml
+        self.resolution = map_yaml["img_resolution"]
+        self.image_origin_px_x = map_yaml["image_origin_px_x"]
+        self.image_origin_px_y = map_yaml["image_origin_px_y"]
+
+        # Keep picture for displaying purposes
+        img = cv2.imread(image)
+
+        # Resize image to a height of 1000px if its height is not 1000px
+        # if img.shape[0] != 1000:
+        #     old_height = img.shape[0]
+        #     img = cv2.resize(img, (int(img.shape[1] * 1000 / img.shape[0]),
+        #                            int(1000)))
+        #     self.scale_factor = 1000 / old_height
+        # else:
+        #     self.scale_factor = 1
+        self.scale_factor = 1
+        self.img = img
+
+        # # Reduce the contrast of the image
+        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # cl1 = clahe.apply(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        # # make the image brighter
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+        # self.img = cv2.convertScaleAbs(self.img, alpha=2.5, beta=0)
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+
+        # Desaturate the image
+        self.img = cv2.cvtColor(self.img, cv2.COLOR_BGR2HSV)
+        self.img[:, :, 1] = self.img[:, :, 1] * 0.4
+        self.img[:, :, 2] = self.img[:, :, 2] * .5
+        self.img = cv2.cvtColor(self.img, cv2.COLOR_HSV2BGR)
+        # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # cl1 = clahe.apply(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        # # make the image brighter
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+        # self.img = cv2.convertScaleAbs(self.img, alpha=2.5, beta=0)
+        # self.img = cv2.cvtColor(cl1, cv2.COLOR_GRAY2BGR)
+
+
+        # Create mission object. Only QGC missions have GPS coordinates for the
+        # origin
+        mission_file = os.path.join(os.path.dirname(map_path),
+                                    map_yaml["quad_plan"])
+        mission_file_format = map_yaml["quad_plan_format"]
+        if map_yaml["quad_plan_format"] == "Sim":
+            self.mission = Mission(mission_file, mission_file_format)
+        elif map_yaml["quad_plan_format"] == "QGC":
+            self.origin = np.array([float(map_yaml["gps_origin_lat"]),
+                                   float(map_yaml["gps_origin_long"])])
+            self.mission = Mission(mission_file, map_yaml["quad_plan_format"],
+                                   self.origin)
+        else:
+            sys.exit("Invalid mission format")
+
+        # Generate the graph and calculate costs with Dijkstra
+        self.generateGraph()
+
+    def logger(self, msg, msgtype="info"):
+        assert isinstance(msg, str)
+        if self.node is not None:
+            if msgtype == "info":
+                self.node.get_logger().info(msg)
+            elif msgtype == "error":
+                self.node.get_logger().error(msg)
+        else:
+            print(msg)
+
+
+    def scale_points(self, utms_x, utms_y):
+        """ scale_points can take an utm point and return the corresponding
+        x,y coordinates in the image"""
+        if isinstance(utms_x, float):
+            utms_x = [utms_x]
+            utms_y = [utms_y]
+        x = []
+        y = []
+        for utm_x, utm_y in zip(utms_x, utms_y):
+            x_, y_ = [int(utm_x*self.resolution)+self.image_origin_px_x,
+                      -int(utm_y*self.resolution)+self.image_origin_px_y]
+            x.append(int(x_*self.scale_factor))
+            y.append(int(y_*self.scale_factor))
+        if len(x) == 1:
+            return x[0], y[0]
+        return x, y
+
+    def scale_pixels(self, p_x, p_y):
+        """ scale_pixels can take a pixel and return the corresponding utm
+        coordinates """
+        if isinstance(p_x, float):
+            p_x = [p_x]
+            p_y = [p_y]
+        utms_x = []
+        utms_y = []
+        for pxs_x, pxs_y, in zip(p_x, p_y):
+            utm_x_, utm_y_ = [(pxs_x-self.image_origin_px_x)/self.resolution,
+                              -(pxs_y - self.image_origin_px_y)/self.resolution]
+            utms_x.append(utm_x_)
+            utms_y.append(utm_y_)
+        if len(utms_x) == 1:
+            return utms_x[0], utms_y[0]
+        return utms_x, utms_y
+
+
+    def getDistance(self, p1, p2):
+        """Gets the distance in meters from two points p0 and p2, both points in
+        standard coordinates """
+        return np.linalg.norm(np.array(p1) - np.array(p2))
+
+    def draw_poly_nofly(self, img, filled=False):
+        if len(img.shape) == 2:
+            color = 255
+        else:
+            color = (00, 50, 200)
+        # Draw all the no fly zones
+        for item in self.mission.noFly:
+            p1 = [i[0] for i in item]
+            p2 = [i[1] for i in item]
+            x, y = self.scale_points(p1, p2)
+            # Close the polygon
+            x.append(x[0])
+            y.append(y[0])
+            pts = np.array([x, y]).T
+            pts = pts.reshape((-1, 1, 2))
+            if filled:
+                cv2.fillPoly(img, [pts], color, 1)
+            else:
+                cv2.polylines(img, [pts], True, color, 3)
+        # Draw the fence
+        fence = np.array(self.mission.fence["polygon"])
+        fence_x, fence_y = self.scale_points(fence[:, 0], fence[:, 1])
+        fence = np.array([fence_x, fence_y]).T
+        fence = fence.reshape((-1, 1, 2))
+        if filled:
+            # We want the negative of the fence here
+            mask = np.full(img.shape[:2], 255, dtype=np.uint8)
+            cv2.fillPoly(mask, [fence], 0, 1)
+            cv2.add(img, mask, img)
+        else:
+            img = cv2.polylines(img, [fence], True, color, 4)
+        return img
+
+    def generateGraph(self):
+        # create a set with all the possible waypoints
+        points = {}
+        for i in self.mission.waypoints:
+            points[i] = {"latlon": self.mission.waypoints[i],
+                         "neigh": {j: None for j
+                                   in self.mission.waypoints.keys() if j != i}}
+
+        # Remove points that are too far away from each other
+        for i in points:
+            for j in points[i]["neigh"].copy():
+                d = self.getDistance(points[i]["latlon"], points[j]["latlon"])
+                if d > self.max_edge_length:
+                    del points[i]["neigh"][j]
+
+        # Create a mask for the no-fly zone
+        polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+        polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
+
+        # Dilate the mask so that the lines are not too close to the fence
+        kernel_size = int(self.resolution*self.scale_factor)*5
+        self.polygon_mask = cv2.dilate(polygon_mask,
+                                       np.ones((kernel_size, kernel_size),
+                                               np.uint8),
+                                       iterations=1)
+        # Display polygon mask
+        # cv2.imshow("mask", self.polygon_mask)
+        # cv2.waitKey(0)
+
+        for i in points:
+            for j in points[i]["neigh"].copy():
+                lat, long = points[i]["latlon"]
+                lat2, long2 = points[j]["latlon"]
+                x, y = self.scale_points(lat, long)
+                x2, y2 = self.scale_points(lat2, long2)
+                line_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+                cv2.line(line_mask, (x, y), (x2, y2), 255, 3)
+                intersection = cv2.bitwise_and(line_mask, self.polygon_mask)
+                # Check if the line intersects with the noFly zone
+                if cv2.countNonZero(intersection) > 0:
+                    del points[i]["neigh"][j]
+
+            # Check that we have at least one route to all the waypoints
+            # shutdown node otherwise
+            if len(points[i]["neigh"]) == 0:
+                self.logger("No route to waypoint {}".format(i), msgtype="error")
+                if self.node is not None:
+                    self.node.shutdown()
+                else:
+                    sys.exit()
+
+
+        # Fill the neighbor distances
+        for i in points:
+            for j in points[i]["neigh"]:
+                d = self.getDistance(points[i]["latlon"], points[j]["latlon"])
+                points[i]["neigh"][j] = d
+        self.graph = points
+
+        # Calculate paths for all the nodes
+        # Not very efficient but it is a small graph
+        for r in self.graph:
+            _, self.graph[r]["path"] = self.dijkstra(r)
+
+    def planRoute(self, start_latlon, end_latlon):
+        """ Returns the route for """
+        # Check that the start and end are within the map boundaries
+        start_x, start_y = self.scale_points(start_latlon[0], start_latlon[1])
+        end_x, end_y = self.scale_points(end_latlon[0], end_latlon[1])
+
+        if start_x < 0 or start_x > self.img.shape[1] or \
+                start_y < 0 or start_y > self.img.shape[0]:
+            self.logger("Start point outside image range", msgtype="error")
+            return None
+        if end_x < 0 or end_x > self.img.shape[1] or \
+                end_y < 0 or end_y > self.img.shape[0]:
+            self.logger("End point outside image range", msgtype="error")
+            return None
+
+        # Check that the points are within the allowed geofence
+        fence_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+        fence = np.array(self.mission.fence["polygon"])
+        fence_x, fence_y = self.scale_points(fence[:, 0], fence[:, 1])
+        fence = np.array([fence_x, fence_y]).T
+        fence = fence.reshape((-1, 1, 2))
+        fence_mask = cv2.fillPoly(fence_mask, [fence], 255, 1)
+        # Invert image as we want black the points outside the fence
+        fence_mask = cv2.bitwise_not(fence_mask)
+        # IMPORTANT: Do no check for the no-fly zones here because the target
+        # robot may be inside one!
+
+        point_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+        point_mask = cv2.circle(point_mask, (start_x, start_y),
+                                10, 255, 2)
+        point_mask = cv2.circle(point_mask, (end_x, end_y),
+                                10, 255, 2)
+        if cv2.countNonZero(cv2.bitwise_and(fence_mask, point_mask)) > 0:
+            self.logger("Start or end point is outside the allowed geofence",
+                        msgtype="error")
+            return None
+
+        # Find the closest waypoint to the start and end
+        dstart = np.inf
+        dend = np.inf
+        for r in self.graph:
+            d = self.getDistance(start_latlon, self.graph[r]["latlon"])
+            if d < dstart:
+                dstart = d
+                start_node = r
+            d = self.getDistance(end_latlon, self.graph[r]["latlon"])
+            if d < dend:
+                dend = d
+                end_node = r
+
+        with self.lock:
+            self.last_start = start_latlon
+            self.last_end = end_latlon
+            # If start and end node are the same, return a list with a single
+            # item
+            if start_node == end_node:
+                self.last_path = [start_node]
+            else:
+                self.last_path = self.graph[start_node]["path"][end_node]
+
+            # Check if we have 3 waypoints or more in our path and see if we
+            # can skip the first one (avoids going backwards and then
+            # move forward)
+            if len(self.last_path) >= 2:
+                # Create lines for the start and first waypoint, and the first
+                # and second waypoints
+                l1_1 = np.array(start_latlon)
+                l1_2 = self.graph[self.last_path[0]]["latlon"]
+                l1 = l1_2 - l1_1
+                l2_1 = np.array(self.graph[self.last_path[0]]["latlon"])
+                l2_2 = np.array(self.graph[self.last_path[1]]["latlon"])
+                l2 = l2_1 - l2_2
+                # Get the angle between the two lines
+                angle = np.arccos(np.dot(l1, l2) / (np.linalg.norm(l1) *
+                                                    np.linalg.norm(l2)))
+                if angle < np.pi / 2:
+                    lat, long = start_latlon
+                    lat2, long2 = l2_2
+                    x, y = self.scale_points(lat, long)
+                    x2, y2 = self.scale_points(lat2, long2)
+                    line_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+                    cv2.line(line_mask, (x, y), (x2, y2), 255, 5)
+                    intersection = cv2.bitwise_and(line_mask,
+                                                   self.polygon_mask)
+                    # Check if the line intersects with the noFly zone
+                    if cv2.countNonZero(intersection) == 0:
+                        self.logger("Removing first waypoint")
+                        self.last_path.pop(0)
+
+        return self.last_path.copy()
+
+    def dijkstra(self, start):
+        dist = {node: float('inf') for node in self.graph}
+        dist[start] = 0
+        pq = [(0, start)]
+        predecessors = {node: None for node in self.graph}
+        while pq:
+            (distance, node) = heapq.heappop(pq)
+            if distance > dist[node]:
+                continue
+            for neighbor, weight in self.graph[node]["neigh"].items():
+                new_distance = dist[node] + weight
+                if new_distance < dist[neighbor]:
+                    dist[neighbor] = new_distance
+                    predecessors[neighbor] = node
+                    heapq.heappush(pq, (new_distance, neighbor))
+        paths = {node: [] for node in self.graph}
+        for node in self.graph:
+            if predecessors[node] is None:
+                continue
+            current_node = node
+            while current_node is not None:
+                paths[node].insert(0, current_node)
+                current_node = predecessors[current_node]
+        return (dist, paths)
+
+    def generate_waypoints(self, strategy = "kmeans", cell_area = 400.0):
+        '''
+        Generate waypoints given the current geo-fencing. Possible strategies include:
+            "kmeans" : Uses k-means clustering over a uniform sampling. We set k such that each waypoint covers
+                roughly cell_area square-meters. This generally creates more evenly spaced waypoints
+            "random" : Picks waypoint locations randomly and thins-out areas where points are too close together
+        '''
+        # Get a mask with the geofences and no fly zones
+        polygon_mask = np.zeros(self.img.shape[:2], dtype=np.uint8)
+        polygon_mask = self.draw_poly_nofly(polygon_mask, filled=True)
+
+        # Dilate the mask so that the lines are not too close to the fence
+        # Important: this dilation needs to be larger than the default dilation
+        # used for graph generation
+        kernel_size = int(self.resolution*self.scale_factor)*9
+        polygon_mask = cv2.dilate(polygon_mask,
+                                       np.ones((kernel_size, kernel_size),
+                                               np.uint8),
+                                       iterations=1)
+
+        if strategy == "kmeans":
+            # Determine the number of pixels per waypoint
+            px_per_m = self.resolution
+            # We want ~1 waypoint per 3 meters
+            px_per_wp = math.floor(px_per_m * 3.0)
+
+            # Create a regular grid of pixel coordinates
+            rows = np.arange(0, polygon_mask.shape[0], px_per_wp)
+            cols = np.arange(0, polygon_mask.shape[1], px_per_wp)
+            grid_y, grid_x = np.meshgrid(rows, cols, indexing='ij')
+
+            # Stack coordinates into (N, 2) array of [y, x]
+            grid_points = np.stack((grid_y.ravel(), grid_x.ravel()), axis=-1)
+
+            # Filter those coordinates by the mask
+            valid_mask = polygon_mask[grid_y, grid_x] == 0
+            samples = grid_points[valid_mask.ravel()]
+
+            # Determine how many clusters we want
+            area_per_wp = (px_per_wp * (1.0/px_per_m))**2
+            wp_per_area = 1.0/area_per_wp
+            cluster_size = round(wp_per_area * cell_area)
+            num_clusters = round(len(samples)/cluster_size)
+
+            print(f"Number of grid points: {len(samples)}")
+            print(f"Approximate total area: {area_per_wp * len(samples)}")
+            print(f"Desirded clusters: {num_clusters}")
+
+            # Convert to floating-point
+            samples = samples.astype(np.float64)
+            # Run k-means clustering
+            samples, _ = kmeans(samples, k_or_guess=num_clusters)
+            # Convert back to integers
+            samples = samples.astype(np.int64)
+
+            filtered_utm = self.scale_pixels(samples[:, 1], samples[:, 0])
+            filtered_utm = np.array(filtered_utm).T
+
+        elif strategy == "random":
+            # Pick random points within the positive mask
+            positive_idx = np.argwhere(polygon_mask == 0)
+            random_idx = np.random.randint(0, positive_idx.shape[0],
+                                        size=positive_idx.shape[0]//500)
+            # samples = positive_idx[random_idx]
+            samples = positive_idx[::500]
+            # print(samples)
+            print(f"Size: {len(samples)}")
+
+            # Filter the points so that they are at least 5 m separated
+            target_distance = 5
+            filtered_samples = []
+            for (x1, y1) in samples:
+                is_valid = True
+                for (x2, y2) in filtered_samples:
+                    d_px = np.linalg.norm([[y2-y1, x2-x1]])
+                    d_m = d_px / self.resolution
+                    if d_m < target_distance:
+                        is_valid = False
+                        break
+                if is_valid:
+                    filtered_samples.append([x1, y1])
+            filtered_samples = np.array(filtered_samples)
+
+            filtered_utm = self.scale_pixels(filtered_samples[:, 1], filtered_samples[:, 0])
+            filtered_utm = np.array(filtered_utm).T
+
+        # Sort them so they look prettier
+        filtered_utm = filtered_utm[np.lexsort((filtered_utm[:, 1], filtered_utm[:, 0]))]
+        replacement_wpts = {i+2: [p[0], p[1]] for i, p in enumerate(filtered_utm)}
+        self.mission.waypoints = replacement_wpts
+
+        # # Display replacement wpts
+        # image = np.ones((polygon_mask.shape[0], polygon_mask.shape[1], 3),
+        #                 dtype=np.uint8)*255
+        # image[polygon_mask == 0] = 0
+        # for p in samples:
+        #     cv2.circle(image, (p[1], p[0]), radius=3, color=(0, 0, 255), thickness=-1)
+        # imS = cv2.resize(image, (image.shape[0]//4, image.shape[1]//4))
+        # cv2.imshow("mask", imS)
+        # cv2.waitKey(0)
+
+        # Save the generated file
+        self.mission.generate_mission_file()
+
+        # We need to regenerate the graph with the current points
+        self.generateGraph()
+
+
+    def display_points(self, get_image=False, origin=False, waypoints=False,
+                       noFly=False, rally=False, routes=False, plan=False):
+        old_x = None
+        old_y = None
+        img = self.img.copy()
+        # Make img rgba
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
+        if origin:
+            # Display the origin in the image
+            img = cv2.circle(img, (int(self.image_origin_px_x*self.scale_factor),
+                                   int(self.image_origin_px_y*self.scale_factor)),
+                             thickness=2, radius=10, color=(20, 20, 20))
+        if waypoints:
+            for i in self.mission.waypoints:
+                wp = self.mission.waypoints[i]
+                # print(f"Lat: {lat:.6f}, Lon: {lon:.6f}")
+                x, y = self.scale_points(wp[0], wp[1])
+                if old_x is not None and old_y is not None:
+                    img = cv2.line(img, (old_x, old_y), (x, y), (0, 255, 0), 2)
+                img = cv2.circle(img, (x, y), 10, (0, 255, 0), -1)
+                img = cv2.putText(img, str(i), (x+10, y-10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
+                old_x = x
+                old_y = y
+
+        if rally:
+            for item in self.rally:
+                lat = item[0]
+                lon = item[1]
+                x, y = self.scale_points(lat, lon)
+                img = cv2.circle(img, (x, y), 2, (255, 0, 255), -1)
+                # img = cv2.putText(img, str(i), (x, y),
+                #                   cv2.FONT_HERSHEY_SIMPLEX, .25, (0, 0, 255))
+
+        if noFly:
+            img = self.draw_poly_nofly(img, filled=False)
+
+        if routes:
+            overlay = img.copy()
+            for route in self.graph:
+                for neigh in self.graph[route]["neigh"]:
+                    lat, long = self.graph[route]["latlon"]
+                    lat2, long2 = self.graph[neigh]["latlon"]
+                    x, y = self.scale_points(lat, long)
+                    x2, y2 = self.scale_points(lat2, long2)
+                    cv2.line(overlay, (x, y), (x2, y2), (0, 255, 0), 2)
+            alpha = 0.25
+            result = cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0)
+            img = result
+
+            for route in self.graph:
+                for neigh in self.graph[route]["neigh"]:
+                    lat, long = self.graph[route]["latlon"]
+                    lat2, long2 = self.graph[neigh]["latlon"]
+                    x, y = self.scale_points(lat, long)
+                img = cv2.circle(img, (x, y), 10, (100, 255, 0), -1)
+                # img = cv2.putText(img, str(route), (x, y),
+                #                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+        if plan:
+            with self.lock:
+                if self.last_end is not None and self.last_start is not None \
+                        and self.last_path is not None:
+                    last_x_end, last_y_end = self.scale_points(self.last_end[0],
+                                                               self.last_end[1])
+                    img = cv2.circle(img, (last_x_end, last_y_end),
+                                     10, (128, 255, 255), -1)
+
+                    last_x_start, last_y_start = self.scale_points(self.last_start[0],
+                                                                   self.last_start[1])
+                    img = cv2.circle(img, (last_x_start, last_y_start),
+                                     10, (0, 255, 255), -1)
+
+                    for i, node in enumerate(self.last_path):
+                        lat, long = self.graph[node]["latlon"]
+                        x, y = self.scale_points(lat, long)
+                        img = cv2.circle(img, (x, y), 10, (0, 255, 255), -1)
+                        if i > 0:
+                            lat, long = self.graph[self.last_path[i-1]]["latlon"]
+                            x2, y2 = self.scale_points(lat, long)
+                            cv2.line(img, (x, y), (x2, y2), (0, 255, 255), 3)
+                        if i == 0:
+                            cv2.line(img, (x, y),
+                                     (last_x_start, last_y_start),
+                                     (0, 255, 255), 3)
+                    # Plot a line connecting the end and the last node
+                    # cv2.line(img, (x, y), (last_x_end, last_y_end),
+                    #          (0, 255, 255), 3)
+            for route in self.graph:
+                for neigh in self.graph[route]["neigh"]:
+                    lat, long = self.graph[route]["latlon"]
+                    lat2, long2 = self.graph[neigh]["latlon"]
+                    x, y = self.scale_points(lat, long)
+                # img = cv2.putText(img, str(route), (x, y),
+                #                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+        # print the max edge length and map at the top
+        cv2.putText(img, f"Max Edge Length: {self.max_edge_length}m",
+                    (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        if not get_image:
+            cv2.namedWindow('Pennovation', cv2.WINDOW_NORMAL)
+            cv2.imshow('Pennovation', img)
+            cv2.waitKey(0)
+        else:
+            # make img rgb
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return img
+
+
+def main():
+    # read program arguments
+    parser = argparse.ArgumentParser(
+            prog=f"{os.path.basename(__file__)}",
+            description='Read a yaml file and plot waypoints')
+    parser.add_argument('--map_name',
+                        help='Map name to use from semantics_manager',
+                        required=True)
+    parser.add_argument('--max_edge_length',
+                        help='Max edge length for the graph',
+                        required=False, default=20, type=int)
+    parser.add_argument('--save_graph',
+                        help='Save the waypoint graph as a json',
+                        action='store_true', required=False)
+    parser.add_argument('--generate_waypoints',
+                        help='Generate a new waypoint mission based on the input mission fences',
+                        action='store_true', required=False)
+    args = parser.parse_args()
+
+    map_path = args.map_name
+    max_edge_length = args.max_edge_length
+
+    print(f"Map path: {map_path}")
+    print(f"Max edge length: {args.max_edge_length}")
+
+    # Create a path planner object
+    q = Path_planner(map_path, max_edge_length)
+
+    # Optionally, generate new waypoints from the mission file and save it as a
+    # .plan file
+    if args.generate_waypoints:
+        q.generate_waypoints()
+
+    # Optionally, save the graph into a yaml file
+    if args.save_graph:
+        graph_sanitized = {i: {'utm': q.graph[i]['latlon'], 'edges': q.graph[i]['neigh']} for i in q.graph}
+        with open('graph_dump.json', 'w') as json_file:
+            json.dump(graph_sanitized, json_file, indent=4)
+
+    q.display_points(waypoints=True, noFly=True, origin=True)
+
+    i = 0
+    for j in range(100):
+        start_latlon = [random.uniform(-130, 130),
+                        random.uniform(-100, 100)]
+        end_latlon = [random.uniform(-130, 130),
+                      random.uniform(-100, 100)]
+        print(f"Start: {start_latlon} - End: {end_latlon}")
+        # Check if start or end are within no fly zones
+        route = q.planRoute(start_latlon, end_latlon)
+        if route is not None:
+            q.display_points(noFly=True, routes=True, plan=True)
+            i += 1
+            if i == 3:
+                break
+
+if __name__ == "__main__":
+    main()
