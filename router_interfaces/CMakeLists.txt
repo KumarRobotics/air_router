@@ -15,7 +15,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Sphere.msg"
   "msg/Goal.msg"
   "srv/AddThreeInts.srv"
-  "action/SetWaypoint.action"
+  "action/WaypointMove.action"
+  "action/PositionMove.action"
   DEPENDENCIES geometry_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 

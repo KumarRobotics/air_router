@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+  <!-- ==================== PARAMETERS ==================== -->
+  <arg name="output" default="screen"/>
+
+  <!-- Namespace -->
+  <arg name="ns" default="nimbus"/>
+
+  <!-- Map configuration -->
+  <!-- <arg name="config_path" default="$(find-pkg-share air_router)/maps/sim_map_config.yaml"/> -->
+
+  <!-- Use sim -->
+  <!-- <arg name="sim" default="True"/> -->
+
+  <!-- Navigator parameters -->
+  <arg name="acceptance_radius" default="6"/>
+  <arg name="max_edge_length" default="100" />
+
+  <!-- ==================== LAUNCH NODES ================== -->
+
+  <node pkg="nimbus" exec="nimbus_navigator.py" name="nimbus_navigator" namespace="$(var ns)" output="$(var output)">
+    <param name="acceptance_radius" value="$(var acceptance_radius)" />
+    <!-- <param name="sim" value="$(var sim)" /> -->
+    <!-- <param name="config_path" value="$(var config_path)" /> -->
+    <param name="max_edge_length" value="$(var max_edge_length)" />
+  </node>
+
+  <node pkg="nimbus" exec="pilot" name="pilot" namespace="$(var ns)" output="$(var output)"/>
+
+</launch>

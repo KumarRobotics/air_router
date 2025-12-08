@@ -21,7 +21,7 @@
 #include <mavros_msgs/srv/waypoint_pull.hpp>
 #include <mavros_msgs/msg/waypoint_list.hpp>
 
-#include "router_interfaces/action/set_waypoint.hpp"
+#include "router_interfaces/action/waypoint_move.hpp"
 
 
 #define DEBUG_PILOT		false
@@ -82,8 +82,8 @@ private:
 
 class Pilot : public rclcpp::Node {
 public:
-	using SetWaypoint = router_interfaces::action::SetWaypoint;
-	using GoalHandleSetWaypoint = rclcpp_action::ServerGoalHandle<SetWaypoint>;
+	using WaypointMove = router_interfaces::action::WaypointMove;
+	using GoalHandleWaypointMove = rclcpp_action::ServerGoalHandle<WaypointMove>;
 
 	Pilot();
 
@@ -98,7 +98,7 @@ private:
 	rclcpp::Client<mavros_msgs::srv::WaypointPull>::SharedPtr pull_wp_client_;
 
 	// Action server
-	rclcpp_action::Server<SetWaypoint>::SharedPtr set_wp_action_server_;
+	rclcpp_action::Server<WaypointMove>::SharedPtr set_wp_action_server_;
 
 
 
@@ -127,14 +127,14 @@ private:
 	// WP Action accept goal callback -- Blindly accepts all goals
 	rclcpp_action::GoalResponse handle_goal(
 			const rclcpp_action::GoalUUID & uuid,
-			std::shared_ptr<const SetWaypoint::Goal> goal);
+			std::shared_ptr<const WaypointMove::Goal> goal);
 	// WP Action cancel callback -- does nothing but should probably stop the quad
 	rclcpp_action::CancelResponse handle_cancel(
-			const std::shared_ptr<GoalHandleSetWaypoint> goal_handle);
+			const std::shared_ptr<GoalHandleWaypointMove> goal_handle);
 	// WP Action execution callback -- starts a new thread and returns
 	void handle_accepted(
-			const std::shared_ptr<GoalHandleSetWaypoint> goal_handle);
+			const std::shared_ptr<GoalHandleWaypointMove> goal_handle);
 	// Worker function to monitor waypoint move. Returns when the quad reaches the waypoint or action is canceled.
-	void execute(const std::shared_ptr<GoalHandleSetWaypoint> goal_handle);
+	void execute(const std::shared_ptr<GoalHandleWaypointMove> goal_handle);
 };
 

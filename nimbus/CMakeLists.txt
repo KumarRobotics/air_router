@@ -22,6 +22,7 @@ ament_python_install_package(nimbus)
 # Install Python executables
 install(PROGRAMS
   nimbus/goal_finder.py
+  nimbus/nimbus_navigator.py
   nimbus/navigator.py
   nimbus/robot_finder.py
   nimbus/route_planner.py

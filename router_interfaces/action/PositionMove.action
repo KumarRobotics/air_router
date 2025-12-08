@@ -1,0 +1,11 @@
+# Goal
+string action
+geometry_msgs/PointStamped goal
+
+---
+# Result
+bool success
+
+---
+# Feedback
+float64 progress

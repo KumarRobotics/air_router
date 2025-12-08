@@ -166,22 +166,23 @@ bool PX4Mission::get_waypoint(int wp_id, Waypoint_Position* pos) {
 Pilot::Pilot() : Node("pilot") {
 	// Subscribe to global position
 	position_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
-			"mavros/global_position/global",					// Topic name
+			"/mavros/global_position/global",					// Topic name
 			rclcpp::QoS(rclcpp::KeepLast(10)).best_effort(),	// QoS history depth
 			std::bind(&Pilot::position_callback, this, std::placeholders::_1)
 	);
 	// Subscribe to mission data
 	mission_wp_sub_ = this->create_subscription<mavros_msgs::msg::WaypointList>(
-			"mavros/mission/waypoints",					// Topic name
+			"/mavros/mission/waypoints",					// Topic name
 			rclcpp::QoS(rclcpp::KeepLast(10)).best_effort(),	// QoS history depth
 			std::bind(&Pilot::mission_wp_callback, this, std::placeholders::_1)
 	);
 	set_wp_client_ = this->create_client<mavros_msgs::srv::WaypointSetCurrent>("/mavros/mission/set_current");
 	pull_wp_client_ = this->create_client<mavros_msgs::srv::WaypointPull>("/mavros/mission/pull");
 
-	set_wp_action_server_ = rclcpp_action::create_server<SetWaypoint>(
+	// Action server
+	set_wp_action_server_ = rclcpp_action::create_server<WaypointMove>(
 			this,
-			"set_waypoint",   // Action name
+			"pilot/set_waypoint",
 			std::bind(&Pilot::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
 			std::bind(&Pilot::handle_cancel, this, std::placeholders::_1),
 			std::bind(&Pilot::handle_accepted, this, std::placeholders::_1));
@@ -248,10 +249,10 @@ void Pilot::mission_wp_callback(const mavros_msgs::msg::WaypointList::SharedPtr 
 void Pilot::set_waypoint_callback(rclcpp::Client<mavros_msgs::srv::WaypointSetCurrent>::SharedFuture result) {
 	const auto response = result.get();
 	if(response->success) {
-		RCLCPP_INFO(this->get_logger(), "Successfully set next waypoint.");
+		RCLCPP_INFO(this->get_logger(), "MAVROS accepted next waypoint.");
 	}
 	else {
-		RCLCPP_WARN(this->get_logger(), "Failed to set next waypoint.");
+		RCLCPP_WARN(this->get_logger(), "MAVROS rejected next waypoint.");
 	}
 }
 
@@ -280,7 +281,7 @@ void Pilot::pull_waypoints_timer_callback() {
 }
 
 // WP Action accept goal callback -- Blindly accepts all goals
-rclcpp_action::GoalResponse Pilot::handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const SetWaypoint::Goal> goal) {
+rclcpp_action::GoalResponse Pilot::handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const WaypointMove::Goal> goal) {
 	// Suppress warnings...
 	(void)uuid;
 	RCLCPP_INFO(this->get_logger(), "Received waypoint goal request: %d", goal->waypoint);
@@ -290,7 +291,7 @@ rclcpp_action::GoalResponse Pilot::handle_goal(const rclcpp_action::GoalUUID & u
 }
 
 // WP Action cancel callback -- does nothing but should probably stop the quad
-rclcpp_action::CancelResponse Pilot::handle_cancel(const std::shared_ptr<GoalHandleSetWaypoint> goal_handle) {
+rclcpp_action::CancelResponse Pilot::handle_cancel(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 	// Suppress warnings...
 	(void)goal_handle;
 	RCLCPP_WARN(this->get_logger(), "Canceling waypoint action");
@@ -300,19 +301,19 @@ rclcpp_action::CancelResponse Pilot::handle_cancel(const std::shared_ptr<GoalHan
 }
 
 // WP Action execution callback -- starts a new thread and returns
-void Pilot::handle_accepted(const std::shared_ptr<GoalHandleSetWaypoint> goal_handle) {
+void Pilot::handle_accepted(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 	// Run on a separate thread so the executor isn't blocked
 	std::thread{std::bind(&Pilot::execute, this, goal_handle)}.detach();
 }
 
 // Worker function to monitor waypoint move. Returns when the quad reaches the waypoint or action is canceled.
-void Pilot::execute(const std::shared_ptr<GoalHandleSetWaypoint> goal_handle) {
+void Pilot::execute(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 	// Get goal and feedback handles
-	const std::shared_ptr<const router_interfaces::action::SetWaypoint::Goal> goal = goal_handle->get_goal();
-	auto feedback = std::make_shared<SetWaypoint::Feedback>();
-	auto result = std::make_shared<SetWaypoint::Result>();
+	const std::shared_ptr<const router_interfaces::action::WaypointMove::Goal> goal = goal_handle->get_goal();
+	auto feedback = std::make_shared<WaypointMove::Feedback>();
+	auto result = std::make_shared<WaypointMove::Result>();
 
-	RCLCPP_INFO(this->get_logger(), "Executing waypoint action, move to %d", goal->waypoint);
+	RCLCPP_INFO(this->get_logger(), "Executing waypoint action, move to %d -- tolerance: %.2f", goal->waypoint, goal->tolerance);
 
 	// Actually send the waypoint command
 	set_waypoint(goal->waypoint);
@@ -349,6 +350,14 @@ void Pilot::execute(const std::shared_ptr<GoalHandleSetWaypoint> goal_handle) {
 				// Action complete.. break out of the while-loop
 				break;
 			}
+		}
+		else {
+			// Slowly complain about not finding the waypoint
+			static int counter = 0;
+			if(counter%10 == 0) {
+				RCLCPP_WARN(this->get_logger(), "Not able to find waypoint %d!", goal->waypoint);
+			}
+			counter++;
 		}
 
 		loop_rate.sleep();
