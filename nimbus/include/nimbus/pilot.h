@@ -100,11 +100,7 @@ private:
 	// Action server
 	rclcpp_action::Server<WaypointMove>::SharedPtr set_wp_action_server_;
 
-
-
-
 	// Timers
-	rclcpp::TimerBase::SharedPtr pull_timer_;
 
 	// Other variables
 	QuadPosition quadPosition;
@@ -120,7 +116,7 @@ private:
 	// Mission waypoints callback
 	void set_waypoint_callback(rclcpp::Client<mavros_msgs::srv::WaypointSetCurrent>::SharedFuture result);
 	// Request mission waypoints from MAVROS/PX4
-	// TODO: This should probably be done in the Map node
+	/// WARNING: This function is now deprecated. Only nodes that set the FC mission should request a waypoint pull.
 	void pull_waypoints_timer_callback();
 
 	/// Action callbacks
@@ -128,7 +124,7 @@ private:
 	rclcpp_action::GoalResponse handle_goal(
 			const rclcpp_action::GoalUUID & uuid,
 			std::shared_ptr<const WaypointMove::Goal> goal);
-	// WP Action cancel callback -- does nothing but should probably stop the quad
+	// WP Action cancel callback -- acknowledges the cancel but does not stop the quad
 	rclcpp_action::CancelResponse handle_cancel(
 			const std::shared_ptr<GoalHandleWaypointMove> goal_handle);
 	// WP Action execution callback -- starts a new thread and returns
