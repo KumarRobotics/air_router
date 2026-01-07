@@ -290,13 +290,13 @@ rclcpp_action::GoalResponse Pilot::handle_goal(const rclcpp_action::GoalUUID & u
 	return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
 
-// WP Action cancel callback -- does nothing but should probably stop the quad
+// WP Action cancel callback -- acknowledges the cancel but does not stop the quad
 rclcpp_action::CancelResponse Pilot::handle_cancel(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 	// Suppress warnings...
 	(void)goal_handle;
 	RCLCPP_WARN(this->get_logger(), "Canceling waypoint action");
 
-	// TODO: Should probably stop the quad or something
+	// Just return "accept"
 	return rclcpp_action::CancelResponse::ACCEPT;
 }
 
