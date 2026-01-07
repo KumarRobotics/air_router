@@ -100,11 +100,7 @@ private:
 	// Action server
 	rclcpp_action::Server<WaypointMove>::SharedPtr set_wp_action_server_;
 
-
-
-
 	// Timers
-	rclcpp::TimerBase::SharedPtr pull_timer_;
 
 	// Other variables
 	QuadPosition quadPosition;
@@ -120,7 +116,7 @@ private:
 	// Mission waypoints callback
 	void set_waypoint_callback(rclcpp::Client<mavros_msgs::srv::WaypointSetCurrent>::SharedFuture result);
 	// Request mission waypoints from MAVROS/PX4
-	// TODO: This should probably be done in the Map node
+	/// WARNING: This function is now deprecated. Only nodes that set the FC mission should request a waypoint pull.
 	void pull_waypoints_timer_callback();
 
 	/// Action callbacks

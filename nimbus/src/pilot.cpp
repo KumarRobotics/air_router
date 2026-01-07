@@ -188,9 +188,6 @@ Pilot::Pilot() : Node("pilot") {
 			std::bind(&Pilot::handle_accepted, this, std::placeholders::_1));
 
 	// Wall timers
-	pull_timer_ = this->create_wall_timer(
-			std::chrono::seconds(5),
-			std::bind(&Pilot::pull_waypoints_timer_callback, this));
 
 	RCLCPP_INFO(this->get_logger(), "Pilot node initialized.");
 }
@@ -257,8 +254,11 @@ void Pilot::set_waypoint_callback(rclcpp::Client<mavros_msgs::srv::WaypointSetCu
 }
 
 // Request mission waypoints from MAVROS/PX4
-// TODO: This should probably be done in the Map node
+/// WARNING: This function is now deprecated. Only nodes that set the FC mission should request a waypoint pull.
 void Pilot::pull_waypoints_timer_callback() {
+	// This is deprecated --> make a fuss!
+	RCLCPP_WARN(this->get_logger(), "Pilot::pull_waypoints_timer_callback is deprecated!");
+
 	if(!pull_wp_client_->wait_for_service(std::chrono::seconds(1))) {
 		RCLCPP_WARN(this->get_logger(), "Waiting for /mavros/mission/pull service...");
 		return;
