@@ -18,6 +18,52 @@ characteristics:
 
 3. You can create as many *no fly* zones as you want (exclusion fences).
 
+
+## Simulation Setup
+
+The ROS2 version of air_router supports are Px4 Gazebo simulation. Follow the below steps to setup the simulation:
+
+1. If you do not already have it installed, clone and configure the PX4 Autopilot repo. This is customarily placed in the users home directory.
+
+```
+git clone https://github.com/PX4/PX4-Autopilot.git --recursive
+
+bash ./PX4-Autopilot/Tools/setup/ubuntu.sh
+```
+
+You may need to reboot after the above.
+
+2. Install MAVROS for you ROS2 version:
+
+```
+sudo apt install ros-<ros-distro>-mavros
+```
+
+3. Launch Gazebo sim through the PX4 autopilot.
+
+```
+cd ~/PX4-Autopilot
+make px4_sitl gz_x500
+```
+
+4. Within your ROS2 workspace, launch MAVROS:
+
+```
+ros2 launch mavros px4.launch fcu_url:=udp://:14540@127.0.0.1
+```
+
+MAVROS will likely complain that the origin isn't set. You can set it using:
+
+```
+ros2 topic pub /mavros/global_position/set_gp_origin geographic_msgs/msg/GeoPointStamped "{header: {frame_id: 'map'}, position: {latitude: 47.3979712, longitude: 8.5461636, altitude: 30.0}}"
+```
+
+You should now be able to list and echo MAVROS topics. You can launch the nimbus stack using the nimbus launch file. This laucnh file simply runs the autopilot stack and does not execute a mission. 
+
+```
+ros2 launch nimbus nimbus.launch
+```
+
 ## Citation
 
 If you find air_router useful, please cite:
