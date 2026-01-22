@@ -1,0 +1,11 @@
+# Goal
+int32[] waypoints
+float64 tolerance
+
+---
+# Result
+bool success
+
+---
+# Feedback
+float64 progress
