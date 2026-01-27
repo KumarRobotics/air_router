@@ -141,7 +141,7 @@ bool PX4Mission::get_waypoint(int wp_id, Waypoint_Position* pos) {
 	}
 	else {
 		// Yes, is this waypoint in range?
-		if(wp_id >= 0 && wp_id < (int)(latest_mission_.waypoints.size() & INT_MAX)) {
+		if(valid_waypoint(wp_id)) {
 			// Yes, copy over lat/long/alt
 			(*pos).latitude = latest_mission_.waypoints[wp_id].x_lat;
 			(*pos).longitude= latest_mission_.waypoints[wp_id].y_long;
@@ -153,6 +153,11 @@ bool PX4Mission::get_waypoint(int wp_id, Waypoint_Position* pos) {
 	}
 
 	return true;
+}
+
+// Checks to see if wp_id exists in the mission
+bool PX4Mission::valid_waypoint(int wp_id) {
+	return (wp_id >= 0) && (wp_id < (int)(latest_mission_.waypoints.size() & INT_MAX));
 }
 
 
@@ -189,15 +194,29 @@ Pilot::Pilot() : Node("pilot") {
 
 	// Wall timers
 
+	/*
+	 * Wait for the mission topic to be ready, then request the mission.
+	 * This is supposed to automatically happen when we subscribe to
+	 * "/mavros/mission/waypoints", but that doesn't always happen...
+	 */
+	pull_mission_waypoints();
+
 	RCLCPP_INFO(this->get_logger(), "Pilot node initialized.");
 }
 
 // Set the target waypoint on the quad through MAVROS
-void Pilot::set_waypoint(uint16_t waypoint_index) {
+bool Pilot::set_waypoint(uint16_t waypoint_index) {
 	// Wait for service to become available
 	if (!set_wp_client_->wait_for_service(std::chrono::seconds(2))) {
 		RCLCPP_ERROR(this->get_logger(), "Service /mavros/mission/set_current not available.");
-		return;
+		return true;
+	}
+
+	// Were we sent an invalid waypoint?
+	if(!px4Mission.valid_waypoint(waypoint_index)) {
+		// Yes, return false!
+		RCLCPP_WARN(this->get_logger(), "Pilot::set_waypoint: Sent bad waypoint (%d)", waypoint_index);
+		return false;
 	}
 
 	auto request = std::make_shared<mavros_msgs::srv::WaypointSetCurrent::Request>();
@@ -214,6 +233,9 @@ void Pilot::set_waypoint(uint16_t waypoint_index) {
 			std::placeholders::_1
 		)
 	);
+
+	// If we made this this far, it worked!
+	return true;
 }
 
 // Global position callback
@@ -230,8 +252,10 @@ void Pilot::position_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) 
 
 // Mission waypoints callback
 void Pilot::mission_wp_callback(const mavros_msgs::msg::WaypointList::SharedPtr msg) {
+	// Received mission data
+	RCLCPP_INFO(this->get_logger(), "Received %zu mission waypoints.", msg->waypoints.size());
+
 	if(DEBUG_PILOT) {
-		RCLCPP_INFO(this->get_logger(), "Received %zu mission waypoints.", msg->waypoints.size());
 		for(size_t i = 0; i < msg->waypoints.size(); i++) {
 			const auto &wp = msg->waypoints[i];
 			RCLCPP_INFO(this->get_logger(), "WP %zu: lat=%f lon=%f alt=%f cmd=%d",
@@ -254,10 +278,9 @@ void Pilot::set_waypoint_callback(rclcpp::Client<mavros_msgs::srv::WaypointSetCu
 }
 
 // Request mission waypoints from MAVROS/PX4
-/// WARNING: This function is now deprecated. Only nodes that set the FC mission should request a waypoint pull.
-void Pilot::pull_waypoints_timer_callback() {
-	// This is deprecated --> make a fuss!
-	RCLCPP_WARN(this->get_logger(), "Pilot::pull_waypoints_timer_callback is deprecated!");
+/// This may take a while to complete! Should only be called once, unless the mission changes
+void Pilot::pull_mission_waypoints() {
+	RCLCPP_INFO(this->get_logger(), "Requesting mission waypoints (may take some time...)");
 
 	if(!pull_wp_client_->wait_for_service(std::chrono::seconds(1))) {
 		RCLCPP_WARN(this->get_logger(), "Waiting for /mavros/mission/pull service...");
@@ -315,8 +338,13 @@ void Pilot::execute(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 
 	RCLCPP_INFO(this->get_logger(), "Executing waypoint action, move to %d -- tolerance: %.2f", goal->waypoint, goal->tolerance);
 
-	// Actually send the waypoint command
-	set_waypoint(goal->waypoint);
+	// Try to send the waypoint to PX4
+	if(!set_waypoint(goal->waypoint)) {
+		result->success = false;
+		goal_handle->abort(result);
+		RCLCPP_INFO(this->get_logger(), "Unable to send waypoint");
+		return;
+	}
 
 	// Run this feedback thread at 4 Hz
 	rclcpp::Rate loop_rate(4.0);
@@ -352,12 +380,13 @@ void Pilot::execute(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 			}
 		}
 		else {
-			// Slowly complain about not finding the waypoint
-			static int counter = 0;
-			if(counter%10 == 0) {
-				RCLCPP_WARN(this->get_logger(), "Not able to find waypoint %d!", goal->waypoint);
-			}
-			counter++;
+			// This waypoint is not in the mission!
+			RCLCPP_WARN(this->get_logger(), "Not able to find waypoint %d!", goal->waypoint);
+			// Cancel this action!
+			result->success = false;
+			goal_handle->abort(result);
+			RCLCPP_INFO(this->get_logger(), "Canceled waypoint action!");
+			return;
 		}
 
 		loop_rate.sleep();

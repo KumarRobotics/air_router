@@ -44,6 +44,8 @@ class Navigator(Node):
 
         # Create action client
         self.wp_action_client = ActionClient(self, WaypointMove, '/nimbus/pilot/set_waypoint')
+        # Handle needed to cancel waypoint actions
+        self.current_client_goal_handle = None
 
         # Track when we have completed a waypoint
         self.reached_waypoint = True
@@ -102,6 +104,9 @@ class Navigator(Node):
             return
 
         self.get_logger().info('Waypoint accepted')
+
+        # Store the action handle (used to cancel action, if needed)
+        self.current_client_goal_handle = goal_handle
 
         # Attach result callback
         self._get_result_future = goal_handle.get_result_async()
@@ -164,9 +169,9 @@ class Navigator(Node):
             result.success = True
             return result
 
-        # Example: Print the goal
+        # Print the goal
         self.get_logger().info(
-            f"Received waypoint sequence: {quad_route[0]} -> {quad_route[-1]}"
+            f"Received WaypointSequence w/ {len(quad_route)} stops --> {quad_route[-1]}"
         )
 
         # Send first waypoint
@@ -180,10 +185,15 @@ class Navigator(Node):
         while rclpy.ok():
             # Did the action get cancelled..?
             if goal_handle.is_cancel_requested:
+                self.get_logger().info("Canceling current waypoint move...")
+                # Is there an active sub-action running?
+                if self.current_client_goal_handle is not None:
+                    # Request cancellation of the sub-action
+                    future = self.current_client_goal_handle.cancel_goal_async()
+                # Cancel this goal
                 goal_handle.canceled()
-                self.get_logger().info("WaypointSequence canceled.")
                 return WaypointSequence.Result(success=False)
-            
+
             # Did we reach the current waypoint?
             if self.reached_waypoint:
                 # Update waypoint
@@ -218,7 +228,7 @@ class Navigator(Node):
         result = WaypointSequence.Result()
         result.success = True
 
-        self.get_logger().info("WaypointSequence succeeded.")
+        self.get_logger().info("WaypointSequence complete.")
         goal_handle.succeed()
         return result
 

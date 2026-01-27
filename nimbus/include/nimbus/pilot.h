@@ -71,6 +71,8 @@ public:
 	bool get_mission(mavros_msgs::msg::WaypointList* out_msg);
 	// Copies the details of waypoint wp_id into pos, returns true if successful
 	bool get_waypoint(int wp_id, Waypoint_Position* pos);
+	// Checks to see if wp_id exists in the mission
+	bool valid_waypoint(int wp_id);
 
 private:
 	mavros_msgs::msg::WaypointList latest_mission_;
@@ -107,7 +109,7 @@ private:
 	PX4Mission px4Mission;
 
 	// Set the target waypoint on the quad through MAVROS
-	void set_waypoint(uint16_t waypoint_index);
+	bool set_waypoint(uint16_t waypoint_index);
 
 	// Callback for GPS position updates
 	void position_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg);
@@ -115,9 +117,10 @@ private:
 	void mission_wp_callback(const mavros_msgs::msg::WaypointList::SharedPtr msg);
 	// Mission waypoints callback
 	void set_waypoint_callback(rclcpp::Client<mavros_msgs::srv::WaypointSetCurrent>::SharedFuture result);
+
 	// Request mission waypoints from MAVROS/PX4
-	/// WARNING: This function is now deprecated. Only nodes that set the FC mission should request a waypoint pull.
-	void pull_waypoints_timer_callback();
+	/// This may take a while to complete! Should only be called once, unless the mission changes
+	void pull_mission_waypoints();
 
 	/// Action callbacks
 	// WP Action accept goal callback -- Blindly accepts all goals
