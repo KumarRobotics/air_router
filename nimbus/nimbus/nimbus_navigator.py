@@ -6,8 +6,7 @@ from rclpy.action import ActionClient
 from rclpy.action import ActionServer
 from rclpy.action import CancelResponse
 
-from router_interfaces.action import WaypointMove
-from router_interfaces.action import WaypointSequence
+from router_interfaces.action import WaypointMove, WaypointSequence
 
 """Navigator:
 This node handles the current waypoint queue. It removes waypoints from the 
@@ -56,7 +55,7 @@ class Navigator(Node):
         self.move_action_server = ActionServer(
             self,
             WaypointSequence,
-            'navigator/set_position',
+            'navigator/set_route',
             execute_callback=self.position_execute_callback,
             cancel_callback=self.position_cancel_callback,
             goal_callback=self.position_goal_callback
