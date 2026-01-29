@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient, CancelResponse, GoalResponse
@@ -24,18 +25,16 @@ class NimbusPlanner(Node):
             self,
             WaypointMove,
             'planner/move_to_waypoint',
-            execute_callback=self.execute_callback,
-            goal_callback=self.goal_callback,
-            cancel_callback=self.cancel_callback,
-            callback_group=self._cb_group
+            execute_callback=self.route_execute_callback,
+            goal_callback=self.route_goal_callback,
+            cancel_callback=self.route_cancel_callback
         )
 
         # Nav's set_route Action Client
         self._navigator_client = ActionClient(
             self,
             WaypointSequence,
-            '/nimbus/navigator/set_route',
-            callback_group=self._cb_group
+            '/nimbus/navigator/set_route'
         )
 
         # Track the active handle for the client so we can cancel it if needed
@@ -48,26 +47,23 @@ class NimbusPlanner(Node):
         self.get_logger().info("Nimbus Planner is ready.")
 
 
-    def goal_callback(self, goal_request):
-        """Accept or reject incoming goals."""
+    def route_goal_callback(self, goal_request):
+        """Accept the incoming goals."""
         self.get_logger().info(f"Planner received request for Waypoint: {goal_request.waypoint}")
-        return GoalResponse.ACCEPT
+        
+        # Just say yes...
+        return rclpy.action.GoalResponse.ACCEPT
 
 
-    def cancel_callback(self, goal_handle):
+
+    def route_cancel_callback(self, goal_handle):
         """Accept cancellation requests."""
         self.get_logger().info("Planner received cancel request.")
         return CancelResponse.ACCEPT
 
 
-    async def execute_callback(self, goal_handle):
-        """
-        Main execution logic:
-        1. Calculate route.
-        2. Send route to Navigator.
-        3. Monitor result and handle cancellation.
-        """
-        self.get_logger().info("Executing plan...")
+    async def route_execute_callback(self, goal_handle):
+        self.get_logger().info("Executing WaypointMove action...")
 
         # Verify that the navigator is up and running
         if not self._navigator_client.wait_for_server(timeout_sec=5.0):
@@ -111,13 +107,13 @@ class NimbusPlanner(Node):
                 goal_handle.canceled()
                 return WaypointMove.Result(success=False)
 
-            # Did we reach the current waypoint?
-            if self.finished_route:
-                break
-
             # Report progress
             feedback_msg.distance_to_go = self.route_progress
             goal_handle.publish_feedback(feedback_msg)
+
+            # Did we reach the current waypoint?
+            if self.finished_route:
+                break
 
             # Spin ROS
             rclpy.spin_once(self)
@@ -154,6 +150,9 @@ class NimbusPlanner(Node):
 
     # --- Send the route to the navigator --------------------------------
     def send_wp_route(self, route_sequence, tolerance: float):
+        # Wait for the action server to come online
+        self._navigator_client.wait_for_server()
+
         # Create navigator action request
         nav_goal = WaypointSequence.Goal()
         nav_goal.waypoints = route_sequence
@@ -233,16 +232,16 @@ class NimbusPlanner(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = NimbusPlanner()
-    
-    # Use MultiThreadedExecutor to ensure reentrant callbacks work smoothly
-    from rclpy.executors import MultiThreadedExecutor
-    executor = MultiThreadedExecutor()
-    
-    rclpy.spin(node, executor=executor)
-    
-    node.destroy_node()
+
+    planner_node = NimbusPlanner()
+
+    print(f"\tSpinning node...")
+
+    rclpy.spin(planner_node)
+
+    planner_node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
