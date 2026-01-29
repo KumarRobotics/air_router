@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient, CancelResponse, GoalResponse
@@ -8,20 +7,7 @@ from rclpy.task import Future
 
 from router_interfaces.action import WaypointMove, WaypointSequence
 
-# # --- MOCK IMPORTS FOR DEMONSTRATION (Delete these in your actual code) ---
-# # Assuming these exist in your router_interfaces package based on your description
-# class WaypointMove:
-#     class Goal: pass
-#     class Result: pass
-#     class Feedback: pass
-#     class Impl: pass 
-#     # Just a dummy class structure for the linter
-
-# class WaypointSequence:
-#     class Goal: pass
-#     class Result: pass
-#     class Feedback: pass
-# # -------------------------------------------------------------------------
+DEBUG_PLANNER = True
 
 
 class NimbusPlanner(Node):
@@ -33,18 +19,18 @@ class NimbusPlanner(Node):
         # to process callbacks concurrently (essential for cancellation to work)
         self._cb_group = ReentrantCallbackGroup()
 
-        # 1. The Action Server: Accepts a request to go to a specific single waypoint
+        # move_to_waypoint Action Server
         self._action_server = ActionServer(
             self,
             WaypointMove,
-            'planner/move_to_waypoint', # Topic name for this planner
+            'planner/move_to_waypoint',
             execute_callback=self.execute_callback,
             goal_callback=self.goal_callback,
             cancel_callback=self.cancel_callback,
             callback_group=self._cb_group
         )
 
-        # 2. The Action Client: Sends the sequence of waypoints to the navigator
+        # Nav's set_route Action Client
         self._navigator_client = ActionClient(
             self,
             WaypointSequence,
@@ -54,18 +40,25 @@ class NimbusPlanner(Node):
 
         # Track the active handle for the client so we can cancel it if needed
         self._current_navigator_goal_handle = None
+        # Track when we finished a route
+        self.finished_route = False
+        # Track how far we are along the route
+        self.route_progress = 0.0
 
         self.get_logger().info("Nimbus Planner is ready.")
+
 
     def goal_callback(self, goal_request):
         """Accept or reject incoming goals."""
         self.get_logger().info(f"Planner received request for Waypoint: {goal_request.waypoint}")
         return GoalResponse.ACCEPT
 
+
     def cancel_callback(self, goal_handle):
         """Accept cancellation requests."""
         self.get_logger().info("Planner received cancel request.")
         return CancelResponse.ACCEPT
+
 
     async def execute_callback(self, goal_handle):
         """
@@ -76,15 +69,22 @@ class NimbusPlanner(Node):
         """
         self.get_logger().info("Executing plan...")
 
+        # Verify that the navigator is up and running
+        if not self._navigator_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error("Navigator action server not available!")
+            goal_handle.abort()
+            return WaypointMove.Result(success=False)
+
         # Extract request data
         target_waypoint = goal_handle.request.waypoint
         tolerance = goal_handle.request.tolerance
 
-        # --- STEP 1: Generate the Route ---
-        # Call your custom logic to get the list of waypoints
+        # Calculate route to desired waypoint
         route_sequence = self.calculate_route(target_waypoint)
         
+        # Did we find a valid route?
         if not route_sequence:
+            # No, give up!
             self.get_logger().warn(f"Could not find a route to waypoint {target_waypoint}")
             goal_handle.abort()
             result = WaypointMove.Result()
@@ -93,85 +93,43 @@ class NimbusPlanner(Node):
         
         self.get_logger().info(f"Generated route: {route_sequence}")
 
-        # --- STEP 2: Send to Navigator ---
-        if not self._navigator_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error("Navigator action server not available!")
-            goal_handle.abort()
-            return WaypointMove.Result(success=False)
+        # Send first waypoint
+        self.send_wp_route(route_sequence, tolerance)
 
-        # Prepare the goal for the sub-action
-        nav_goal = WaypointSequence.Goal()
-        nav_goal.waypoints = route_sequence
-        nav_goal.tolerance = tolerance
+        feedback_msg = WaypointMove.Feedback()
 
-        # Send the goal asynchronously
-        self.get_logger().info("Sending sequence to Navigator...")
-        send_goal_future = self._navigator_client.send_goal_async(
-            nav_goal,
-            feedback_callback=self.navigator_feedback_callback
-        )
-
-        # Wait for the goal to be accepted/rejected
-        # We use await here because we are in an async callback
-        nav_goal_handle = await send_goal_future
-
-        if not nav_goal_handle.accepted:
-            self.get_logger().error("Navigator rejected the route.")
-            goal_handle.abort()
-            return WaypointMove.Result(success=False)
-
-        # Store the handle so we can cancel it later if necessary
-        self._current_navigator_goal_handle = nav_goal_handle
-
-        # --- STEP 3: Wait for Result & Handle Cancellation ---
-        result_future = nav_goal_handle.get_result_async()
-
-        # We loop checking for cancellation while waiting for the result
-        while not result_future.done():
-            # Check if the PARENT action (Planner) has been canceled
+        # Run action-loop
+        while rclpy.ok():
+            # Did the action get cancelled..?
             if goal_handle.is_cancel_requested:
-                self.get_logger().info("Planner canceling Navigator goal...")
-                
-                # Cancel the CHILD action (Navigator)
-                # We do not await this, just fire and forget usually, or await if strictly needed
-                await nav_goal_handle.cancel_goal_async()
-                
+                self.get_logger().info("Canceling current route...")
+                # Is there an active sub-action running?
+                if self._current_navigator_goal_handle is not None:
+                    # Request cancellation of the sub-action
+                    future = self._current_navigator_goal_handle.cancel_goal_async()
+                # Cancel this goal
                 goal_handle.canceled()
-                self._current_navigator_goal_handle = None
                 return WaypointMove.Result(success=False)
-            
-            # Use a small sleep or await a short timer to prevent busy-looping
-            # This allows the executor to process feedback callbacks
-            try:
-                # Wait for the future for a tiny amount of time
-                # Note: 'asyncio.wait_for' is an alternative, but strict rclpy standard 
-                # often relies on the executor. Here we just await the future with a check.
-                # Since we can't easily "await with timeout" on a Future in pure rclpy 
-                # without external libs, checking .done() in a loop with a small sleep is common pattern.
-                import asyncio
-                await asyncio.sleep(0.1) 
-            except Exception:
-                pass
 
-        # --- STEP 4: Process Final Result ---
-        nav_result = result_future.result()
-        self._current_navigator_goal_handle = None
-        
+            # Did we reach the current waypoint?
+            if self.finished_route:
+                break
+
+            # Report progress
+            feedback_msg.distance_to_go = self.route_progress
+            goal_handle.publish_feedback(feedback_msg)
+
+            # Spin ROS
+            rclpy.spin_once(self)
+
+        # Done
         result = WaypointMove.Result()
-        
-        status = nav_result.status
-        # Check standard ROS 2 action status codes (4 = SUCCEEDED)
-        if status == 4: # STATUS_SUCCEEDED
-            self.get_logger().info("Navigator finished successfully.")
-            result.success = True
-            goal_handle.succeed()
-        else:
-            self.get_logger().warn(f"Navigator failed or was canceled with status: {status}")
-            result.success = False
-            # If the child failed, we abort the parent
-            goal_handle.abort()
+        result.success = True
 
+        self.get_logger().info("Route complete.")
+        goal_handle.succeed()
         return result
+
 
     def navigator_feedback_callback(self, feedback_msg):
         """
@@ -193,6 +151,72 @@ class NimbusPlanner(Node):
         # (This requires passing the goal_handle to this callback, 
         #  which is complex without a lambda or partial).
 
+
+    # --- Send the route to the navigator --------------------------------
+    def send_wp_route(self, route_sequence, tolerance: float):
+        # Create navigator action request
+        nav_goal = WaypointSequence.Goal()
+        nav_goal.waypoints = route_sequence
+        nav_goal.tolerance = tolerance
+
+        # Goal tracking
+        self.finished_route = False
+        self.route_progress = 0.0
+
+        # Logging
+        self.get_logger().info(f'Sending navigator route (|{len(route_sequence)}|), tolerance = {tolerance}')
+
+        # Send goal asynchronously
+        self._send_goal_future = self._navigator_client.send_goal_async(
+            nav_goal,
+            feedback_callback=self.wp_feedback_callback
+        )
+
+        # Attach callback for request result
+        self._send_goal_future.add_done_callback(self.wp_response_callback)
+
+
+    # --- Route request feedback -----------------------------------------
+    def wp_feedback_callback(self, feedback_msg):
+        # Record how far we have come
+        feedback = feedback_msg.feedback
+        self.route_progress = feedback.progress
+        
+        # Logging
+        if DEBUG_PLANNER:
+            self.get_logger().info(f'Progress: {(feedback.progress*100):.1f}%')
+
+
+    # --- Route request response -----------------------------------------
+    def wp_response_callback(self, future):
+        goal_handle = future.result()
+
+        # Did the nav reject the goal?
+        if not goal_handle.accepted:
+            self.get_logger().warn('Route rejected')
+            self.finished_route = True
+            return
+
+        self.get_logger().info('Route accepted')
+
+        # Store the action handle (used to cancel action, if needed)
+        self._current_navigator_goal_handle = goal_handle
+
+        # Attach result callback
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self.wp_result_callback)
+
+
+    # --- Route request final result -------------------------------------
+    def wp_result_callback(self, future):
+        result = future.result().result
+        # Regardless of the result, mark that the action ended
+        self.finished_route = True
+
+        self.get_logger().info(f'Waypoint action result: {result.success}')
+
+
+
     def calculate_route(self, target_waypoint):
         """
         YOUR LOGIC HERE.
@@ -203,7 +227,9 @@ class NimbusPlanner(Node):
         
         # Example logic: [1, 2, ..., target]
         # Only for demonstration
-        return [10, 20, target_waypoint]
+        return [19, target_waypoint]
+
+
 
 def main(args=None):
     rclpy.init(args=args)
