@@ -5,10 +5,87 @@ from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.task import Future
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+from mavros_msgs.msg import WaypointList
+from threading import Lock
 
 from router_interfaces.action import WaypointMove, WaypointSequence
 
+
 DEBUG_PLANNER = True
+
+
+class WaypointPosition:
+    """
+    WaypointPosition class that is used to move waypoint details between the PX4Mission and 
+    anyone else who is curious about the details of a waypoint in the mission.
+    """
+    def __init__(self, latitude=0.0, longitude=0.0, relative_altitude=0.0):
+        self.latitude = latitude
+        self.longitude = longitude
+        self.relative_altitude = relative_altitude
+
+    def __repr__(self):
+        return f"Lat: {self.latitude}, Lon: {self.longitude}, RelAlt: {self.relative_altitude}"
+
+
+class PX4Mission:
+    """
+    Manages storage and retrieval of the PX4 mission, which is stored as a WaypointList. This 
+    class is used instead of storing the WaypointList directly for thread safety.
+    """
+    def __init__(self):
+        self._latest_mission = None
+        self._has_mission = False
+        self._mission_mutex = Lock()
+
+    def set_mission(self, msg: WaypointList):
+        """
+        Store latest mission message safely.
+        """
+        with self._mission_mutex:
+            self._latest_mission = msg
+            self._has_mission = True
+
+    def get_mission(self):
+        """
+        Returns the full WaypointList if available, else None.
+        """
+        with self._mission_mutex:
+            if not self._has_mission:
+                return None
+            return self._latest_mission
+
+    def get_waypoint(self, wp_id: int):
+        """
+        Returns a WaypointPosition object for the specific ID if valid.
+        Returns None if invalid or no mission exists.
+        """
+        with self._mission_mutex:
+            if not self._has_mission:
+                return None
+
+            # Check bounds (valid_waypoint logic)
+            if 0 <= wp_id < len(self._latest_mission.waypoints):
+                wp = self._latest_mission.waypoints[wp_id]
+                # Map MAVROS fields: x_lat, y_long, z_alt
+                return WaypointPosition(
+                    latitude=wp.x_lat,
+                    longitude=wp.y_long,
+                    relative_altitude=wp.z_alt
+                )
+            else:
+                return None
+
+    def valid_waypoint(self, wp_id: int) -> bool:
+        """
+        Checks if wp_id exists in the mission.
+        """
+        with self._mission_mutex:
+            if not self._has_mission:
+                return False
+            return 0 <= wp_id < len(self._latest_mission.waypoints)
 
 
 class NimbusPlanner(Node):
@@ -44,6 +121,24 @@ class NimbusPlanner(Node):
         # Track how far we are along the route
         self.route_progress = 0.0
 
+        # Internal helper to manage PX4 mission data
+        self.px4_mission = PX4Mission()
+
+        # QoS for talking to PX4 (KeepLast(10), Best Effort)
+        qos_profile = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+            reliability=ReliabilityPolicy.BEST_EFFORT
+        )
+
+        # Subscribe to mission data from PX4
+        self.mission_wp_sub = self.create_subscription(
+            WaypointList,
+            '/mavros/mission/waypoints',
+            self.mission_wp_callback,
+            qos_profile
+        )
+
         self.get_logger().info("Nimbus Planner is ready.")
 
 
@@ -65,15 +160,20 @@ class NimbusPlanner(Node):
     async def route_execute_callback(self, goal_handle):
         self.get_logger().info("Executing WaypointMove action...")
 
+        # Extract request data
+        target_waypoint = goal_handle.request.waypoint
+        tolerance = goal_handle.request.tolerance
+
         # Verify that the navigator is up and running
         if not self._navigator_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error("Navigator action server not available!")
             goal_handle.abort()
             return WaypointMove.Result(success=False)
-
-        # Extract request data
-        target_waypoint = goal_handle.request.waypoint
-        tolerance = goal_handle.request.tolerance
+        # Verify that this is a valid waypoint
+        elif not self.px4_mission.valid_waypoint(target_waypoint):
+            self.get_logger().error(f"Requested bad waypoint ({target_waypoint})!")
+            goal_handle.abort()
+            return WaypointMove.Result(success=False)
 
         # Calculate route to desired waypoint
         route_sequence = self.calculate_route(target_waypoint)
@@ -215,7 +315,6 @@ class NimbusPlanner(Node):
         self.get_logger().info(f'Waypoint action result: {result.success}')
 
 
-
     def calculate_route(self, target_waypoint):
         """
         YOUR LOGIC HERE.
@@ -227,6 +326,22 @@ class NimbusPlanner(Node):
         # Example logic: [1, 2, ..., target]
         # Only for demonstration
         return [19, target_waypoint]
+
+
+    def mission_wp_callback(self, msg: WaypointList):
+        """
+        Callback for /mavros/mission/waypoints
+        """
+        self.get_logger().info(f"Received {len(msg.waypoints)} mission waypoints.")
+
+        # Store the mission
+        self.px4_mission.set_mission(msg)
+
+        # Logging
+        if DEBUG_PLANNER:
+            for i, wp in enumerate(msg.waypoints):
+                self.get_logger().info(f"WP {i}: lat={wp.x_lat} lon={wp.y_long} alt={wp.z_alt}")
+
 
 
 
