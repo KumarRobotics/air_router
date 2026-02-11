@@ -15,6 +15,10 @@
   <!-- Navigator parameters -->
   <arg name="acceptance_radius" default="2.0"/>
 
+  <!-- Nimbus Starter parameters -->
+  <arg name="expected_subscribers" default="2"/>
+  <arg name="start_delay" default="5.0"/>
+
   <!-- ==================== LAUNCH NODES ================== -->
 
   <node pkg="nimbus" exec="pilot" name="pilot" namespace="$(var ns)" output="$(var output)"/>
@@ -24,5 +28,10 @@
   </node>
 
   <node pkg="nimbus" exec="nimbus_planner.py" name="nimbus_planner" namespace="$(var ns)" output="$(var output)"/>
+
+  <node pkg="nimbus" exec="nimbus_starter.py" name="nimbus_starter" namespace="$(var ns)" output="$(var output)">
+    <param name="expected_subscribers" value="$(var expected_subscribers)" />
+    <param name="start_delay" value="$(var start_delay)" />
+  </node>
 
 </launch>

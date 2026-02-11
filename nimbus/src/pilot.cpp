@@ -194,13 +194,6 @@ Pilot::Pilot() : Node("pilot") {
 
 	// Wall timers
 
-	/*
-	 * Wait for the mission topic to be ready, then request the mission.
-	 * This is supposed to automatically happen when we subscribe to
-	 * "/mavros/mission/waypoints", but that doesn't always happen...
-	 */
-	pull_mission_waypoints();
-
 	RCLCPP_INFO(this->get_logger(), "Pilot node initialized.");
 }
 

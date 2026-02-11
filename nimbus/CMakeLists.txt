@@ -24,6 +24,7 @@ install(PROGRAMS
   nimbus/goal_finder.py
   nimbus/nimbus_navigator.py
   nimbus/nimbus_planner.py
+  nimbus/nimbus_starter.py
   nimbus/navigator.py
   nimbus/robot_finder.py
   nimbus/route_planner.py
