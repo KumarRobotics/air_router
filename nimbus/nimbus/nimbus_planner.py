@@ -605,10 +605,10 @@ class NimbusPlanner(Node):
             return None
 
         # Run Dijkstra's algorithm
-        return self._dijkstra(self.graph, start_idx, end_idx)
+        return self._astar(start_idx, end_idx)
 
 
-    def _dijkstra(self, graph, start, end):
+    def _dijkstra(self, start, end):
         queue = [(0, start, [])]
         seen = set()
         min_dist = {start: 0}
@@ -624,7 +624,7 @@ class NimbusPlanner(Node):
             if v1 == end:
                 return path
 
-            for v2, weight in graph.get(v1, {}).items():
+            for v2, weight in self.graph.get(v1, {}).items():
                 if v2 in seen:
                     continue
                 prev = min_dist.get(v2, None)
@@ -633,6 +633,70 @@ class NimbusPlanner(Node):
                     min_dist[v2] = next_cost
                     heapq.heappush(queue, (next_cost, v2, path))
 
+        return None
+    
+    def _astar(self, start, end):
+        """
+        A* Search Algorithm using PX4Mission for live coordinate data.
+        """
+        
+        # Fetch the target waypoint 
+        target_wp = self.px4_mission.get_waypoint(end)
+        if not target_wp:
+            self.get_logger().error(f"Target waypoint {end} not found in mission.")
+            return None
+        
+        # Convert this to lat/long
+        target_utm = utm.from_latlon(target_wp.latitude, target_wp.longitude)
+
+        # Heuristic Function: Euclidean distance in meters from n_idx to end
+        def h(n_idx):
+            # Get waypoint
+            wp = self.px4_mission.get_waypoint(n_idx)
+            if not wp:
+                return float('inf')
+            
+            # Convert to UTM (m)
+            wp_utm = utm.from_latlon(wp.latitude, wp.longitude)
+            
+            # Euclidean distance
+            return math.hypot(target_utm[0] - wp_utm[0], target_utm[1] - wp_utm[1])
+
+        # Priority Queue: (f_score, g_score, current_node, path)
+        start_h = h(start)
+        queue = [(start_h, 0, start, [])]
+        
+        seen = set()
+        min_g = {start: 0}
+
+        # While there are still nodes in the queue
+        while queue:
+            (f, g, u, path) = heapq.heappop(queue)
+
+            if u in seen:
+                continue
+            seen.add(u)
+
+            path = path + [u]
+
+            if u == end:
+                return path
+
+            # Explore neighbors
+            for v, weight in self.graph.get(u, {}).items():
+                if v in seen:
+                    continue
+                
+                new_g = g + weight
+                
+                # If we found a shorter path to v
+                if new_g < min_g.get(v, float('inf')):
+                    min_g[v] = new_g
+                    new_f = new_g + h(v) # Calculate fresh heuristic
+                    heapq.heappush(queue, (new_f, new_g, v, path))
+
+        # If we made it this far.. we failed...
+        self.get_logger().warn(f"Failed to find path to goal ({end})")
         return None
 
 
