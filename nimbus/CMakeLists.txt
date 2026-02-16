@@ -15,6 +15,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(mavros_msgs REQUIRED)
 find_package(router_interfaces REQUIRED)
+find_package(OpenCV REQUIRED)
 
 # Install Python modules
 ament_python_install_package(nimbus)
@@ -32,7 +33,8 @@ install(PROGRAMS
 )
 
 
-# C++ nodes
+## C++ nodes
+# Pilot node
 add_executable(pilot src/pilot.cpp)
 target_include_directories(pilot PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -42,6 +44,25 @@ target_include_directories(pilot PUBLIC
 ament_target_dependencies(pilot rclcpp rclcpp_action sensor_msgs nav_msgs mavros_msgs router_interfaces)
 
 install(TARGETS pilot
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Planner node
+add_executable(planner src/planner.cpp)
+target_include_directories(planner PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${OpenCV_INCLUDE_DIRS}
+)
+
+ament_target_dependencies(planner rclcpp rclcpp_action sensor_msgs nav_msgs mavros_msgs router_interfaces)
+
+# Link in OpenCV
+target_link_libraries(planner
+  ${OpenCV_LIBRARIES}
+)
+
+install(TARGETS planner
   DESTINATION lib/${PROJECT_NAME}
 )
 
