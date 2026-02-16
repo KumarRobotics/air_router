@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 
+# Basic Python stuff
+import cv2
+import numpy as np
+import utm
+import heapq
+import math
+from threading import Lock
+
+# ROS 2 stuff
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient, CancelResponse, GoalResponse
@@ -7,13 +16,18 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.task import Future
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-from mavros_msgs.msg import WaypointList
-from threading import Lock
+# MAVROS stuff
+from mavros_msgs.msg import WaypointList, Waypoint
 
-from router_interfaces.action import WaypointMove, WaypointSequence
+# Our stuff
+from router_interfaces.action import WaypointMove, WaypointSequence # type: ignore
 
 
-DEBUG_PLANNER = True
+DEBUG_PLANNER = False
+
+# MAVLink Commands for Geofence
+MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION = 5001
+MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION = 5002
 
 
 class WaypointPosition:
@@ -57,6 +71,16 @@ class PX4Mission:
                 return None
             return self._latest_mission
 
+    def get_num_waypoints(self):
+        """
+        Returns the number of waypoints in the current mission.
+        """
+        with self._mission_mutex:
+            if not self._has_mission:
+                return 0
+            else:
+                return len(self._latest_mission.waypoints)
+
     def get_waypoint(self, wp_id: int):
         """
         Returns a WaypointPosition object for the specific ID if valid.
@@ -78,6 +102,13 @@ class PX4Mission:
             else:
                 return None
 
+    def get_all_waypoints(self):
+        """Returns a list of all waypoints for planning."""
+        with self._mission_mutex:
+            if not self._has_mission:
+                return []
+            return self._latest_mission.waypoints
+
     def valid_waypoint(self, wp_id: int) -> bool:
         """
         Checks if wp_id exists in the mission.
@@ -86,6 +117,46 @@ class PX4Mission:
             if not self._has_mission:
                 return False
             return 0 <= wp_id < len(self._latest_mission.waypoints)
+
+    def has_mission(self) -> bool:
+        """
+        Checks if wp_id exists in the mission.
+        """
+        with self._mission_mutex:
+            return self._has_mission
+
+
+class PX4Geofence:
+    """
+    Manages storage and retrieval of the geofences (no-fly zones), which are stored as 
+    a WaypointList. This class is used instead of storing the WaypointList directly for 
+    thread safety.
+    """
+    def __init__(self):
+        self._latest_fence = None
+        self._has_fence = False
+        self._fence_mutex = Lock()
+
+    def set_fence(self, msg: WaypointList):
+        with self._fence_mutex:
+            self._latest_fence = msg
+            self._has_fence = True
+
+    def get_fence_points(self):
+        """
+        Returns the raw list of fence waypoints.
+        """
+        with self._fence_mutex:
+            if not self._has_fence:
+                return []
+            return self._latest_fence.waypoints
+
+    def has_fence(self):
+        """
+        Returns true if we have a fence
+        """
+        with self._fence_mutex:
+            return self._has_fence
 
 
 class NimbusPlanner(Node):
@@ -121,8 +192,9 @@ class NimbusPlanner(Node):
         # Track how far we are along the route
         self.route_progress = 0.0
 
-        # Internal helper to manage PX4 mission data
+        # Internal helper to manage PX4 mission/geofence
         self.px4_mission = PX4Mission()
+        self.px4_geofence = PX4Geofence()
 
         # QoS for talking to PX4 (KeepLast(10), Best Effort)
         qos_profile = QoSProfile(
@@ -131,13 +203,38 @@ class NimbusPlanner(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT
         )
 
-        # Subscribe to mission data from PX4
+        # Subscribe to mission waypoints from PX4
         self.mission_wp_sub = self.create_subscription(
             WaypointList,
             '/mavros/mission/waypoints',
             self.mission_wp_callback,
             qos_profile
         )
+
+        # Subscribe to geofence data from PX4
+        self.geofence_sub = self.create_subscription(
+            WaypointList,
+            '/mavros/geofence/fences',
+            self.geofence_callback,
+            qos_profile
+        )
+
+        # Planning Constants
+        self.MAX_EDGE_LENGTH = 500  # Meters
+        self.MAP_RESOLUTION = 10.0  # Pixels per meter
+        self.MAP_BUFFER = 50        # Buffer around mission area in meters
+        self.OBSTACLE_DILATION = 1  # Obstacle dilation, in meters
+        self.graph = None
+
+        # Wait for the PX4 mission and geofence
+        while rclpy.ok() and not self.px4_mission.has_mission():
+            self.get_logger().info("Waiting for valid PX4 Mission...")
+            rclpy.spin_once(self, timeout_sec=1.0)
+        while rclpy.ok() and not self.px4_geofence.has_fence():
+            self.get_logger().info("Waiting for valid geofence...")
+            rclpy.spin_once(self, timeout_sec=1.0)
+
+        self.build_graph()
 
         self.get_logger().info("Nimbus Planner is ready.")
 
@@ -148,7 +245,6 @@ class NimbusPlanner(Node):
         
         # Just say yes...
         return rclpy.action.GoalResponse.ACCEPT
-
 
 
     def route_cancel_callback(self, goal_handle):
@@ -175,8 +271,11 @@ class NimbusPlanner(Node):
             goal_handle.abort()
             return WaypointMove.Result(success=False)
 
-        # Calculate route to desired waypoint
-        route_sequence = self.calculate_route(target_waypoint)
+        # --- Calculate Route ---
+        # TODO: Determine where the quad is...
+        start_node_index = 0
+        
+        route_sequence = self.calculate_route(start_node_index, target_waypoint)
         
         # Did we find a valid route?
         if not route_sequence:
@@ -232,20 +331,8 @@ class NimbusPlanner(Node):
         Receive progress from Navigator (WaypointSequence)
         and (optionally) relay it to the User (WaypointMove).
         """
-        # Note: WaypointSequence returns 'progress' (0.0 to 1.0)
-        # But WaypointMove expects 'distance_to_go' (meters).
-        # Since we don't know the physical distance here easily, 
-        # we might log it or leave it 0.0.
-        
         progress_pct = feedback_msg.feedback.progress
         self.get_logger().info(f"Navigator Progress: {progress_pct*100:.1f}%")
-        
-        # If you wanted to send feedback back up:
-        # feedback = WaypointMove.Feedback()
-        # feedback.distance_to_go = 0.0 # Unknown
-        # self.get_logger().info("Relaying feedback...") 
-        # (This requires passing the goal_handle to this callback, 
-        #  which is complex without a lambda or partial).
 
 
     # --- Send the route to the navigator --------------------------------
@@ -315,19 +402,6 @@ class NimbusPlanner(Node):
         self.get_logger().info(f'Waypoint action result: {result.success}')
 
 
-    def calculate_route(self, target_waypoint):
-        """
-        YOUR LOGIC HERE.
-        Returns a list of integers (waypoints).
-        """
-        # Placeholder: just return a simple list ending in the target
-        self.get_logger().info(f"Calculating route to {target_waypoint}...")
-        
-        # Example logic: [1, 2, ..., target]
-        # Only for demonstration
-        return [19, target_waypoint]
-
-
     def mission_wp_callback(self, msg: WaypointList):
         """
         Callback for /mavros/mission/waypoints
@@ -342,6 +416,224 @@ class NimbusPlanner(Node):
             for i, wp in enumerate(msg.waypoints):
                 self.get_logger().info(f"WP {i}: lat={wp.x_lat} lon={wp.y_long} alt={wp.z_alt}")
 
+
+    def geofence_callback(self, msg: WaypointList):
+        """
+        Callback for /mavros/geofence/fences
+        """
+        self.get_logger().info(f"Received {len(msg.waypoints)} geofence vertices.")
+        self.px4_geofence.set_fence(msg)
+
+
+    # --- Graph building logic --------------------------------------------
+    def build_graph(self):
+        """
+        Builds waypoint graph with distance as edge weights, uses OpenCV for obstacle mapping.
+        """
+        self.get_logger().info(f"Building waypoint graph")
+        
+        # Get mission data
+        mission_wps = self.px4_mission.get_all_waypoints()
+        fence_wps = self.px4_geofence.get_fence_points()
+
+        # Verify that we actually have a waypoints/fence
+        if mission_wps == None or fence_wps == None:
+            self.get_logger().warn("No mission waypoints or fence!")
+            return
+
+        # Establish coordinate system using UTM
+        # Use WP 0 as the origin for local grid
+        origin_lat = mission_wps[0].x_lat
+        origin_lon = mission_wps[0].y_long
+        origin_utm = utm.from_latlon(origin_lat, origin_lon)
+        
+        # Helper to convert lat/lon to local meters
+        def to_local(lat, lon):
+            u = utm.from_latlon(lat, lon)
+            return (u[0] - origin_utm[0], u[1] - origin_utm[1])
+
+        # Process mission nodes
+        nodes = {} # {index: (x, y)}
+        for i, wp in enumerate(mission_wps):
+            x, y = to_local(wp.x_lat, wp.y_long)
+            nodes[i] = (x, y)
+
+        # Determine map bounds for image generation
+        all_x = [p[0] for p in nodes.values()]
+        all_y = [p[1] for p in nodes.values()]
+        
+        # Add fence points to bounds check
+        fence_polygons = self._parse_geofence(fence_wps, to_local)
+        for poly in fence_polygons:
+            for pt in poly['points']:
+                all_x.append(pt[0])
+                all_y.append(pt[1])
+
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+
+        width_m = max_x - min_x + (2 * self.MAP_BUFFER)
+        height_m = max_y - min_y + (2 * self.MAP_BUFFER)
+        
+        img_w = int(width_m * self.MAP_RESOLUTION)
+        img_h = int(height_m * self.MAP_RESOLUTION)
+        
+        # Offset to map pixels
+        offset_x = -min_x + self.MAP_BUFFER
+        offset_y = -min_y + self.MAP_BUFFER
+
+        def to_pix(x_m, y_m):
+            px = int((x_m + offset_x) * self.MAP_RESOLUTION)
+            # Flip Y for image coordinates
+            py = int(img_h - ((y_m + offset_y) * self.MAP_RESOLUTION)) 
+            return px, py
+
+        # Draw obstacles (Mask)
+        # Initialize white image (safe), draw black obstacles
+        # Or: 0 = safe, 255 = obstacle
+        obst_map = np.zeros((img_h, img_w), dtype=np.uint8)
+
+        for poly in fence_polygons:
+            pts_pix = []
+            for pt in poly['points']:
+                pts_pix.append(to_pix(pt[0], pt[1]))
+            
+            pts_np = np.array([pts_pix], dtype=np.int32)
+            
+            if poly['type'] == 'exclusion':
+                cv2.fillPoly(obst_map, pts_np, 255) # 255 is obstacle
+            elif poly['type'] == 'inclusion':
+                # We assume that inclusive geofences are convex hulls and that all 
+                # waypoints are within these convex hulls
+                pass
+
+        # Dilate obstacles for safety margin (e.g., 1 meter)
+        kernel_size = int(self.OBSTACLE_DILATION * self.MAP_RESOLUTION) 
+        if kernel_size > 0:
+            kernel = np.ones((kernel_size, kernel_size), np.uint8)
+            obst_map = cv2.dilate(obst_map, kernel, iterations=1)
+
+        # Build the graph
+        self.graph = {i: {} for i in nodes}
+        
+        for i in nodes:
+            for j in nodes:
+                if i == j: continue
+                
+                # Check distance
+                p1 = np.array(nodes[i])
+                p2 = np.array(nodes[j])
+                dist = np.linalg.norm(p1 - p2)
+                
+                if dist > self.MAX_EDGE_LENGTH:
+                    continue
+
+                # Check collision using Line Iterator or Drawing
+                pix1 = to_pix(nodes[i][0], nodes[i][1])
+                pix2 = to_pix(nodes[j][0], nodes[j][1])
+                
+                # Draw line on a temp mask to check intersection
+                # Optimization: use LineIterator or bitwise check
+                line_mask = np.zeros_like(obst_map)
+                cv2.line(line_mask, pix1, pix2, 255, 1) # 1px width check
+                
+                intersection = cv2.bitwise_and(line_mask, obst_map)
+                if cv2.countNonZero(intersection) == 0:
+                    # Safe path
+                    self.graph[i][j] = dist
+
+
+    def _parse_geofence(self, fence_wps, coord_transform_func):
+        """
+        Groups fence waypoints into polygons based on MAV_CMD.
+        Returns list of dicts: {'type': 'exclusion'/'inclusion', 'points': [(x,y), ...]}
+        """
+        polygons = []
+        current_poly = []
+        current_type = 'exclusion' # Default
+        
+        for wp in fence_wps:
+            # Check for new polygon start or continuation
+            # Logic depends on how MAVROS/QGC serializes lists.
+            # Often it's just a sequence of points.
+            # We look for the Command ID.
+            
+            p_local = coord_transform_func(wp.x_lat, wp.y_long)
+            
+            if wp.command == MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION:
+                # If we were building an inclusion poly, save it
+                if current_type == 'inclusion' and current_poly:
+                     polygons.append({'type': 'inclusion', 'points': current_poly})
+                     current_poly = []
+                current_type = 'exclusion'
+                current_poly.append(p_local)
+                
+            elif wp.command == MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION:
+                 if current_type == 'exclusion' and current_poly:
+                     polygons.append({'type': 'exclusion', 'points': current_poly})
+                     current_poly = []
+                 current_type = 'inclusion'
+                 current_poly.append(p_local)
+            else:
+                # Generic fallback: assume it belongs to the current polygon
+                # or treat as exclusion if unknown
+                current_poly.append(p_local)
+
+        # Append last one
+        if current_poly:
+            polygons.append({'type': current_type, 'points': current_poly})
+
+        # Note: This simple parser assumes consecutive vertices define a polygon.
+        # Robust implementations might check param1 (vertex count).
+        return polygons
+
+
+    # --- Path Planning Logic --------------------------------------------
+    def calculate_route(self, start_idx, end_idx):
+        """
+        Uses OpenCV for obstacle mapping and Dijkstra for routing.
+        """
+        # Verify that we have a graph and were given valid points
+        if self.graph == None:
+            self.get_logger().warn(f"Path planner has no graph!")
+            return None
+        elif not self.px4_mission.valid_waypoint(start_idx):
+            self.get_logger().warn(f"Bad start point ({start_idx})")
+            return None
+        elif not self.px4_mission.valid_waypoint(end_idx):
+            self.get_logger().warn(f"Bad end point ({end_idx})")
+            return None
+
+        # Run Dijkstra's algorithm
+        return self._dijkstra(self.graph, start_idx, end_idx)
+
+
+    def _dijkstra(self, graph, start, end):
+        queue = [(0, start, [])]
+        seen = set()
+        min_dist = {start: 0}
+
+        while queue:
+            (cost, v1, path) = heapq.heappop(queue)
+            
+            if v1 in seen:
+                continue
+            seen.add(v1)
+
+            path = path + [v1]
+            if v1 == end:
+                return path
+
+            for v2, weight in graph.get(v1, {}).items():
+                if v2 in seen:
+                    continue
+                prev = min_dist.get(v2, None)
+                next_cost = cost + weight
+                if prev is None or next_cost < prev:
+                    min_dist[v2] = next_cost
+                    heapq.heappush(queue, (next_cost, v2, path))
+
+        return None
 
 
 

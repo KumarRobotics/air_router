@@ -3,80 +3,101 @@ import rclpy
 from rclpy.node import Node
 from mavros_msgs.srv import WaypointPull
 
+
 class MissionStarter(Node):
     def __init__(self):
-        super().__init__('mission_starter')
+        super().__init__('nimbus_starter')
         
-        # 1. Parameter: How long to wait after launch before doing anything?
         self.declare_parameter('start_delay', 10.0) 
         start_delay_sec = self.get_parameter('start_delay').value
-
-        # 2. Parameter: How many other nodes must be listening?
-        self.declare_parameter('expected_subscribers', 1)
+        
+        self.declare_parameter('expected_subscribers', 2)
         self.target_count = self.get_parameter('expected_subscribers').value
         
         self.mission_topic = '/mavros/mission/waypoints'
-        self.pull_client = self.create_client(WaypointPull, '/mavros/mission/pull')
         
-        self.get_logger().info(f"Node launched. Waiting {start_delay_sec} seconds before starting checks...")
-
-        # 3. Create a One-Shot Timer for the initial delay
-        # This calls 'start_sequence' once after the delay passes
+        # Clients
+        self.ms_pull_client = self.create_client(WaypointPull, '/mavros/mission/pull')
+        self.gf_pull_client = self.create_client(WaypointPull, '/mavros/geofence/pull')
+        
+        self.get_logger().info(f"Node launched. Waiting {start_delay_sec}s...")
+        
         self._startup_timer = self.create_timer(start_delay_sec, self.start_sequence)
-        
-        # Placeholder for the checking timer (we don't create it yet)
         self._check_timer = None
 
 
     def start_sequence(self):
-        """Called once after the initial start_delay."""
-        # Destroy the startup timer so it doesn't fire again
         self.destroy_timer(self._startup_timer)
-        
         self.get_logger().info(f"Startup delay complete. Waiting for {self.target_count} subscribers...")
-
-        # Now create the timer that checks for subscribers
         self._check_timer = self.create_timer(0.5, self.check_subscribers)
 
 
     def check_subscribers(self):
-        # Count how many nodes are subscribing to the mission topic
         try:
             subs_count = self.count_subscribers(self.mission_topic)
         except Exception as e:
             self.get_logger().warn(f"Could not count subscribers: {e}")
             return
-
-        # Barrier Check
-        if subs_count >= self.target_count:
-            self.get_logger().info("Target subscriber count reached! Requesting Mission Pull...")
-            self.trigger_pull()
-
-
-    def trigger_pull(self):
-        # Stop checking
-        if self._check_timer:
-            self._check_timer.cancel()
         
-        if not self.pull_client.wait_for_service(timeout_sec=5.0):
-            self.get_logger().error("MAVROS pull service not available!")
+        if subs_count >= self.target_count:
+            self.get_logger().info("Target count reached! Starting Pull Sequence...")
+            # Stop the timer..
+            self._check_timer.cancel()
+            # Pull mission waypoints
+            self.trigger_mission_pull()
+        else:
+            self.get_logger().info(f"Waiting for {self.target_count} subscribers...")
+
+
+    # --- Pull Mission ---
+    def trigger_mission_pull(self):
+        # Check if service is available
+        if not self.ms_pull_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error("Mission service unavailable!")
             return
+        
+        # Pull waypoints
+        future = self.ms_pull_client.call_async(WaypointPull.Request())
+        future.add_done_callback(self.mission_response_callback)
 
-        req = WaypointPull.Request()
-        future = self.pull_client.call_async(req)
-        future.add_done_callback(self.response_callback)
 
-
-    def response_callback(self, future):
+    def mission_response_callback(self, future):
         try:
             response = future.result()
             if response.success:
-                self.get_logger().info(f"Mission pulled successfully! PX4 has {response.wp_received} waypoints.")
+                self.get_logger().info(f"Mission waypoint pull succeeded: {response.wp_received} waypoints")
             else:
-                self.get_logger().warn("Mission pull request failed.")
+                self.get_logger().warn("Mission waypoint pull failed!")
         except Exception as e:
-            self.get_logger().error(f"Service call failed: {e}")
+            self.get_logger().error(f"Mission waypoint pull call failed: {e}")
         
+        # Try to pull geofence
+        self.trigger_geofence_pull()
+
+
+    # --- Pull Geofence ---
+    def trigger_geofence_pull(self):
+        # Check if service is available
+        if not self.gf_pull_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error("Geofence service unavailable!")
+            return
+        
+        # Pull geofence
+        future = self.gf_pull_client.call_async(WaypointPull.Request())
+        future.add_done_callback(self.geofence_response_callback)
+
+
+    def geofence_response_callback(self, future):
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f"Geofence pull succeeded: {response.wp_received} items.")
+            else:
+                self.get_logger().warn("Geofence pull failed!")
+        except Exception as e:
+            self.get_logger().error(f"Geofence pull call failed: {e}")
+        
+        self.get_logger().info("Start-up Complete. Exiting.")
         raise SystemExit
 
 
@@ -89,7 +110,6 @@ def main(args=None):
         pass
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

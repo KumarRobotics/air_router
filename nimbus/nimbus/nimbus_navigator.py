@@ -6,7 +6,7 @@ from rclpy.action import ActionClient
 from rclpy.action import ActionServer
 from rclpy.action import CancelResponse
 
-from router_interfaces.action import WaypointMove, WaypointSequence
+from router_interfaces.action import WaypointMove, WaypointSequence # type: ignore
 
 """Navigator:
 This node handles the current waypoint queue. It removes waypoints from the 
