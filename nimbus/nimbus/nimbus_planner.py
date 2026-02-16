@@ -7,6 +7,7 @@ import utm
 import heapq
 import math
 from threading import Lock
+from threading import Lock
 
 # ROS 2 stuff
 import rclpy
@@ -15,13 +16,13 @@ from rclpy.action import ActionServer, ActionClient, CancelResponse, GoalRespons
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.task import Future
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from sensor_msgs.msg import NavSatFix
 
 # MAVROS stuff
 from mavros_msgs.msg import WaypointList, Waypoint
 
 # Our stuff
 from router_interfaces.action import WaypointMove, WaypointSequence # type: ignore
-
 
 DEBUG_PLANNER = False
 
@@ -159,6 +160,29 @@ class PX4Geofence:
             return self._has_fence
 
 
+class QuadPosition:
+    """
+    Thread-safe wrapper for tracking most recently published position message
+    """
+    def __init__(self):
+        self._latest_position = None
+        self._pos_mutex = Lock()
+
+    def set_position(self, msg: NavSatFix):
+        """
+        Store position message
+        """
+        with self._pos_mutex:
+            self._latest_position = msg
+
+    def get_position(self):
+        """
+        Returns the latest NavSatFix message if available, else None.
+        """
+        with self._pos_mutex:
+            return self._latest_position
+
+
 class NimbusPlanner(Node):
 
     def __init__(self):
@@ -219,6 +243,18 @@ class NimbusPlanner(Node):
             qos_profile
         )
 
+        # Initialize position helper
+        self.quad_position = QuadPosition()
+
+        # Subscribe to global position
+        self.position_sub = self.create_subscription(
+            NavSatFix,
+            '/mavros/global_position/global',
+            self.position_callback,
+            qos_profile
+        )
+        self.dbg_pos_count = 0
+
         # Planning Constants
         self.MAX_EDGE_LENGTH = 500  # Meters
         self.MAP_RESOLUTION = 10.0  # Pixels per meter
@@ -228,10 +264,16 @@ class NimbusPlanner(Node):
 
         # Wait for the PX4 mission and geofence
         while rclpy.ok() and not self.px4_mission.has_mission():
-            self.get_logger().info("Waiting for valid PX4 Mission...")
+            self.get_logger().info(
+                "Waiting for valid PX4 Mission...", 
+                throttle_duration_sec=1.0
+            )
             rclpy.spin_once(self, timeout_sec=1.0)
         while rclpy.ok() and not self.px4_geofence.has_fence():
-            self.get_logger().info("Waiting for valid geofence...")
+            self.get_logger().info(
+                "Waiting for valid geofence...", 
+                throttle_duration_sec=1.0
+            )
             rclpy.spin_once(self, timeout_sec=1.0)
 
         self.build_graph()
@@ -272,8 +314,10 @@ class NimbusPlanner(Node):
             return WaypointMove.Result(success=False)
 
         # --- Calculate Route ---
-        # TODO: Determine where the quad is...
-        start_node_index = 0
+        start_node_index = self.get_closest_waypoint()
+
+        if DEBUG_PLANNER:
+            print(f"Planning path from {start_node_index} to {target_waypoint}")
         
         route_sequence = self.calculate_route(start_node_index, target_waypoint)
         
@@ -423,6 +467,21 @@ class NimbusPlanner(Node):
         """
         self.get_logger().info(f"Received {len(msg.waypoints)} geofence vertices.")
         self.px4_geofence.set_fence(msg)
+
+
+    def position_callback(self, msg: NavSatFix):
+        """
+        Callback for /mavros/global_position/global
+        """
+        if DEBUG_PLANNER:
+            self.dbg_pos_count += 1
+            if self.dbg_pos_count % 20 == 0:
+                self.get_logger().info(
+                    f"Received NavSatFix: lat={msg.latitude:.6f} lon={msg.longitude:.6f} alt={msg.altitude:.2f}"
+                )
+
+        # Record current position
+        self.quad_position.set_position(msg)
 
 
     # --- Graph building logic --------------------------------------------
@@ -586,6 +645,56 @@ class NimbusPlanner(Node):
         # Note: This simple parser assumes consecutive vertices define a polygon.
         # Robust implementations might check param1 (vertex count).
         return polygons
+
+
+    # --- Find closest waypoint --------------------------------------------
+    def get_closest_waypoint(self):
+        """
+        Determine which waypoint the quad is currently closest to. Returns None if we do 
+        not have a PX4 mission or position.
+        """
+        # Get latest mission and current position
+        current_pos = self.quad_position.get_position()
+        mission_wps = self.px4_mission.get_all_waypoints()
+
+        # Verify that we useful data
+        if current_pos == None:
+            self.get_logger().warn("Failed to get closest waypoint -> no position data")
+            return None
+        if mission_wps == None:
+            self.get_logger().warn("Failed to get closest waypoint -> no mission data")
+            return None
+
+        closest_index = -1
+        min_dist = float('inf')
+        R = 6371000.0  # Earth radius in meters
+
+        # Calculate current position in radians
+        lat1 = math.radians(current_pos.latitude)
+        lon1 = math.radians(current_pos.longitude)
+
+        # Iterate over all waypoints
+        for i, wp in enumerate(mission_wps):
+            # MAVROS Waypoints use x_lat, y_long
+            lat2 = math.radians(wp.x_lat)
+            lon2 = math.radians(wp.y_long)
+
+            # Haversine Formula
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+
+            a = math.sin(dlat / 2)**2 + \
+                math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
+            
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            dist = R * c
+
+            # Update minimum
+            if dist < min_dist:
+                min_dist = dist
+                closest_index = i
+
+        return closest_index
 
 
     # --- Path Planning Logic --------------------------------------------
