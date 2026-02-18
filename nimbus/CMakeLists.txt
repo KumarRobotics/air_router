@@ -47,6 +47,19 @@ install(TARGETS pilot
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# Navigator node
+add_executable(navigator src/navigator.cpp)
+target_include_directories(navigator PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(navigator rclcpp rclcpp_action sensor_msgs nav_msgs mavros_msgs router_interfaces)
+
+install(TARGETS navigator
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 # Planner node
 add_executable(planner src/planner.cpp)
 target_include_directories(planner PUBLIC

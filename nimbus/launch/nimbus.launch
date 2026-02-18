@@ -23,7 +23,7 @@
 
   <node pkg="nimbus" exec="pilot" name="pilot" namespace="$(var ns)" output="$(var output)"/>
 
-  <node pkg="nimbus" exec="nimbus_navigator.py" name="nimbus_navigator" namespace="$(var ns)" output="$(var output)">
+  <node pkg="nimbus" exec="navigator" name="navigator" namespace="$(var ns)" output="$(var output)">
     <param name="acceptance_radius" value="$(var acceptance_radius)" />
   </node>
 
