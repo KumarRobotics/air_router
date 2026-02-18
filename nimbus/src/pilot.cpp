@@ -339,8 +339,8 @@ void Pilot::execute(const std::shared_ptr<GoalHandleWaypointMove> goal_handle) {
 		return;
 	}
 
-	// Run this feedback thread at 4 Hz
-	rclcpp::Rate loop_rate(4.0);
+	// Run this feedback thread at 30 Hz
+	rclcpp::Rate loop_rate(30.0);
 
 	// While ROS is still running...
 	while(rclcpp::ok()) {
