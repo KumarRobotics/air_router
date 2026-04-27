@@ -7,7 +7,6 @@ import utm
 import heapq
 import math
 from threading import Lock
-from threading import Lock
 
 # ROS 2 stuff
 import rclpy
